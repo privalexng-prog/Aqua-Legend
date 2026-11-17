@@ -1,0 +1,2791 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Aqua Legend - 3D Arcade Water Polo</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #0284c7;
+      font-family: 'Nunito', sans-serif;
+    }
+    h1, h2, h3, .arcade-font {
+      font-family: 'Fredoka', sans-serif;
+    }
+    #game-canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      touch-action: none;
+    }
+    .overlay-layer {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      pointer-events: none;
+    }
+    .interactive {
+      pointer-events: auto;
+    }
+    .glass-panel {
+      background: rgba(10, 31, 68, 0.86);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 2px solid rgba(56, 189, 248, 0.45);
+      box-shadow: 0 14px 35px rgba(2, 12, 30, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    }
+    .arcade-btn {
+      transition: transform 0.12s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.12s ease;
+      box-shadow: 0 5px 0 rgba(0, 0, 0, 0.35), 0 8px 16px rgba(0, 0, 0, 0.28);
+      cursor: pointer;
+    }
+    .arcade-btn:hover {
+      transform: translateY(-2px);
+      filter: brightness(1.07);
+    }
+    .arcade-btn:active {
+      transform: translateY(3px);
+      box-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+    }
+    @keyframes floatUpFade {
+      0% { transform: translate(-50%, 0) scale(0.85); opacity: 0; }
+      20% { transform: translate(-50%, -12px) scale(1.08); opacity: 1; }
+      80% { transform: translate(-50%, -32px) scale(1.0); opacity: 1; }
+      100% { transform: translate(-50%, -48px) scale(0.95); opacity: 0; }
+    }
+    .callout-anim {
+      animation: floatUpFade 1.25s ease-out forwards;
+    }
+    @keyframes bannerPop {
+      0% { transform: scale(0.4) rotate(-4deg); opacity: 0; }
+      65% { transform: scale(1.08) rotate(1deg); opacity: 1; }
+      100% { transform: scale(1) rotate(0deg); opacity: 1; }
+    }
+    .banner-pop {
+      animation: bannerPop 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
+    .custom-scroll::-webkit-scrollbar {
+      width: 6px;
+    }
+    .custom-scroll::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 999px;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb {
+      background: rgba(56, 189, 248, 0.55);
+      border-radius: 999px;
+    }
+  </style>
+</head>
+<body>
+  <!-- 3D WebGL Canvas -->
+  <canvas id="game-canvas"></canvas>
+
+  <!-- Floating Callouts Layer -->
+  <div id="callout-layer" class="overlay-layer overflow-hidden z-20"></div>
+
+  <!-- Main HUD (Visible during match) -->
+  <div id="game-hud" class="overlay-layer hidden flex flex-col justify-between p-3 sm:p-5">
+    <!-- Top Bar: Scoreboard + Shot Clock + Pause -->
+    <div class="w-full flex items-start justify-between gap-2">
+      <!-- Sound & Pause Buttons -->
+      <div class="flex items-center gap-2 interactive">
+        <button id="btn-pause" title="Pause / Menu" class="arcade-btn w-11 h-11 rounded-2xl bg-slate-900/85 border-2 border-sky-400/50 text-white flex items-center justify-center text-lg font-black">
+          ⏸
+        </button>
+        <button id="btn-mute" title="Toggle Sound" class="arcade-btn w-11 h-11 rounded-2xl bg-slate-900/85 border-2 border-sky-400/50 text-white flex items-center justify-center text-lg">
+          🔊
+        </button>
+      </div>
+
+      <!-- Center Scoreboard & Shot Clock -->
+      <div class="glass-panel rounded-2xl px-4 py-2 sm:px-6 sm:py-2.5 flex items-center gap-3 sm:gap-6 border-2 border-sky-300/60">
+        <!-- Blue Team -->
+        <div class="flex items-center gap-2 sm:gap-3">
+          <div class="w-3.5 h-8 rounded-full bg-sky-400 shadow-[0_0_12px_#38bdf8]"></div>
+          <div class="text-left">
+            <div id="hud-blue-name" class="text-[10px] sm:text-xs font-extrabold uppercase tracking-wider text-sky-300">SHARKS</div>
+            <div id="hud-blue-score" class="arcade-font text-2xl sm:text-3xl font-black text-white leading-none">0</div>
+          </div>
+        </div>
+
+        <!-- Period & Clocks -->
+        <div class="flex flex-col items-center px-2 sm:px-4 border-x border-sky-400/30">
+          <div id="hud-period" class="text-[10px] sm:text-xs font-black uppercase tracking-widest text-amber-300">Q1 • 2:00</div>
+          <div id="hud-game-clock" class="arcade-font text-lg sm:text-xl font-bold text-white leading-tight">02:00</div>
+          <div class="mt-0.5 px-2.5 py-0.5 rounded-full bg-amber-500/25 border border-amber-400/60 flex items-center gap-1">
+            <span class="text-[9px] font-extrabold text-amber-200 uppercase">SHOT</span>
+            <span id="hud-shot-clock" class="arcade-font text-xs sm:text-sm font-black text-amber-300">30</span>
+          </div>
+        </div>
+
+        <!-- Red Team -->
+        <div class="flex items-center gap-2 sm:gap-3">
+          <div class="text-right">
+            <div id="hud-red-name" class="text-[10px] sm:text-xs font-extrabold uppercase tracking-wider text-rose-300">TITANS</div>
+            <div id="hud-red-score" class="arcade-font text-2xl sm:text-3xl font-black text-white leading-none">0</div>
+          </div>
+          <div class="w-3.5 h-8 rounded-full bg-rose-500 shadow-[0_0_12px_#f43f5e]"></div>
+        </div>
+      </div>
+
+      <!-- Camera Angle Toggle -->
+      <div class="flex items-center gap-2 interactive">
+        <button id="btn-cam" title="Switch Camera View" class="arcade-btn px-3 h-11 rounded-2xl bg-slate-900/85 border-2 border-sky-400/50 text-sky-200 text-xs font-extrabold flex items-center gap-1.5">
+          🎥 <span class="hidden sm:inline">CAM</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Center Event Banner (Countdown, Goal, Foul, Period End) -->
+    <div id="center-banner-wrap" class="w-full flex flex-col items-center justify-center my-auto pointer-events-none">
+      <div id="center-banner" class="hidden banner-pop px-8 py-4 rounded-3xl bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 border-4 border-white shadow-2xl text-center">
+        <div id="center-banner-sub" class="text-xs sm:text-sm font-black uppercase tracking-widest text-amber-100">GET READY</div>
+        <div id="center-banner-main" class="arcade-font text-4xl sm:text-6xl font-black text-white drop-shadow">5</div>
+      </div>
+
+      <!-- Shot Power Meter (Visible when charging shot) -->
+      <div id="shot-meter-wrap" class="hidden mt-4 w-52 sm:w-64 glass-panel rounded-full p-1.5 border-2 border-amber-300">
+        <div class="flex justify-between text-[10px] font-black text-white px-2 mb-0.5">
+          <span>SHOT POWER</span>
+          <span id="shot-power-pct" class="text-amber-300">0%</span>
+        </div>
+        <div class="w-full h-3 bg-slate-950 rounded-full overflow-hidden">
+          <div id="shot-power-bar" class="h-full w-0 bg-gradient-to-r from-emerald-400 via-amber-400 to-rose-500 transition-all duration-75"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom HUD: Controlled Player Status + Desktop Controls / Skill Bar -->
+    <div class="w-full flex flex-col sm:flex-row items-end justify-between gap-3">
+      <!-- Controlled Athlete Card -->
+      <div class="glass-panel rounded-2xl p-3 flex items-center gap-3 min-w-[235px] border-2 border-sky-400/50">
+        <div id="hud-cap-badge" class="w-11 h-11 rounded-xl bg-sky-500 border-2 border-white flex items-center justify-center arcade-font text-xl font-black text-white shadow-md">
+          7
+        </div>
+        <div class="flex-1">
+          <div class="flex items-center justify-between gap-2">
+            <span id="hud-player-name" class="font-black text-white text-sm">ALEX #7</span>
+            <span id="hud-player-role" class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-sky-500/30 text-sky-200 uppercase">SNIPER</span>
+          </div>
+          <!-- Stamina Bar -->
+          <div class="mt-1.5">
+            <div class="flex justify-between text-[10px] font-bold text-sky-200 mb-0.5">
+              <span>STAMINA</span>
+              <span id="hud-stamina-val">100%</span>
+            </div>
+            <div class="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden border border-slate-700">
+              <div id="hud-stamina-bar" class="h-full w-full bg-gradient-to-r from-emerald-400 to-cyan-300 transition-all duration-100"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom-Right Action & Cooldown Controls (Clickable + Keyboard Bound) -->
+      <div id="desktop-controls-bar" class="flex flex-wrap items-center justify-end gap-2 interactive">
+        <!-- Skill 1 -->
+        <button id="hud-skill1-card" type="button" class="arcade-btn glass-panel rounded-xl px-3 py-2 flex items-center gap-2 border border-amber-400/50 text-left">
+          <div class="w-7 h-7 rounded-lg bg-amber-500 text-slate-950 font-black text-xs flex items-center justify-center">1</div>
+          <div>
+            <div id="hud-skill1-name" class="text-xs font-black text-white">Power Skip</div>
+            <div id="hud-skill1-cd" class="text-[10px] font-bold text-emerald-300">READY</div>
+          </div>
+        </button>
+
+        <!-- Skill 2 -->
+        <button id="hud-skill2-card" type="button" class="arcade-btn glass-panel rounded-xl px-3 py-2 flex items-center gap-2 border border-purple-400/50 text-left">
+          <div class="w-7 h-7 rounded-lg bg-purple-500 text-white font-black text-xs flex items-center justify-center">2</div>
+          <div>
+            <div id="hud-skill2-name" class="text-xs font-black text-white">Quick Release</div>
+            <div id="hud-skill2-cd" class="text-[10px] font-bold text-emerald-300">READY</div>
+          </div>
+        </button>
+
+        <!-- Tackle / Block Action + Cooldown -->
+        <button id="hud-tackle-card" type="button" class="arcade-btn glass-panel rounded-xl px-3 py-2 flex items-center gap-2 border border-rose-400/60 text-left">
+          <div class="w-7 h-7 rounded-lg bg-rose-500 text-white font-black text-[10px] flex items-center justify-center">E / B</div>
+          <div>
+            <div class="text-xs font-black text-white">Tackle / Block</div>
+            <div id="hud-tackle-cd" class="text-[10px] font-bold text-emerald-300">READY</div>
+          </div>
+        </button>
+
+        <!-- Call For Pass (C) -->
+        <button id="hud-callpass-card" type="button" class="arcade-btn glass-panel rounded-xl px-3 py-2 flex items-center gap-2 border border-emerald-400/60 text-left">
+          <div class="w-7 h-7 rounded-lg bg-emerald-500 text-slate-950 font-black text-xs flex items-center justify-center">C</div>
+          <div>
+            <div class="text-xs font-black text-white">Call Pass</div>
+            <div id="hud-callpass-cd" class="text-[10px] font-bold text-emerald-300">READY</div>
+          </div>
+        </button>
+
+        <!-- Lob Pass (F) -->
+        <button id="hud-lobpass-card" type="button" class="arcade-btn glass-panel rounded-xl px-3 py-2 flex items-center gap-2 border border-cyan-400/60 text-left">
+          <div class="w-7 h-7 rounded-lg bg-cyan-500 text-slate-950 font-black text-xs flex items-center justify-center">F</div>
+          <div>
+            <div class="text-xs font-black text-white">Lob Pass</div>
+            <div id="hud-lobpass-cd" class="text-[10px] font-bold text-emerald-300">READY</div>
+          </div>
+        </button>
+
+        <!-- Switch Player (Q) -->
+        <button id="hud-switch-card" type="button" class="arcade-btn glass-panel rounded-xl px-3 py-2 flex items-center gap-2 border border-sky-400/60 text-left">
+          <div class="w-7 h-7 rounded-lg bg-sky-500 text-slate-950 font-black text-xs flex items-center justify-center">Q</div>
+          <div>
+            <div class="text-xs font-black text-white">Switch</div>
+            <div class="text-[10px] font-bold text-sky-300">PLAYER</div>
+          </div>
+        </button>
+
+        <!-- Keybind Legend -->
+        <div class="hidden xl:flex glass-panel rounded-xl px-3 py-2 text-[11px] font-bold text-sky-100 gap-3 border border-sky-400/30">
+          <span><b class="text-amber-300">WASD</b> Swim</span>
+          <span><b class="text-amber-300">SHIFT</b> Sprint</span>
+          <span><b class="text-amber-300">LMB</b> Shoot / Tackle</span>
+          <span><b class="text-amber-300">E</b> Pass (Facing)</span>
+          <span><b class="text-amber-300">F</b> Lob</span>
+          <span><b class="text-amber-300">B</b> Block</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3-Second Tackle Clash Overlay (Shown ONLY when User Player is involved in a tackle) -->
+  <div id="tackle-clash-modal" class="overlay-layer hidden z-30 flex items-center justify-center p-4 bg-slate-950/55 backdrop-blur-xs">
+    <div class="glass-panel interactive max-w-md w-full rounded-3xl p-6 border-4 border-amber-400 text-center shadow-2xl banner-pop">
+      <div class="inline-block px-3 py-1 rounded-full bg-rose-500 text-white text-xs font-black uppercase tracking-widest mb-1">
+        WATER BATTLE!
+      </div>
+      <h2 class="arcade-font text-3xl font-black text-white">TACKLE CLASH</h2>
+      <p class="text-sky-200 text-xs sm:text-sm font-bold mt-1">
+        Rapidly tap <span class="text-amber-300 font-black">[SPACE]</span> or click the button below to overpower your opponent!
+      </p>
+
+      <!-- Timer -->
+      <div class="mt-3 arcade-font text-3xl font-black text-amber-300">
+        <span id="clash-timer">3.0</span>s
+      </div>
+
+      <!-- Tug-of-War Progress Meter -->
+      <div class="mt-3 relative w-full h-7 bg-rose-600 rounded-full overflow-hidden border-2 border-white shadow-inner">
+        <div id="clash-bar" class="h-full bg-gradient-to-r from-sky-400 to-emerald-400 transition-all duration-75" style="width: 50%;"></div>
+        <div class="absolute inset-0 flex justify-between items-center px-3 text-[11px] font-black text-white drop-shadow">
+          <span>YOU</span>
+          <span>CPU (8 CPS)</span>
+        </div>
+      </div>
+
+      <!-- Tap Button -->
+      <button id="btn-clash-mash" class="arcade-btn mt-5 w-full py-4 rounded-2xl bg-gradient-to-b from-amber-400 to-orange-500 border-2 border-white arcade-font text-2xl font-black text-slate-950">
+        ⚡ MASH [SPACE] / TAP! ⚡
+      </button>
+    </div>
+  </div>
+
+  <!-- Main Menu Overlay -->
+  <div id="main-menu" class="overlay-layer z-40 flex items-center justify-center p-4 bg-slate-950/35">
+    <div class="glass-panel interactive max-w-2xl w-full rounded-3xl p-6 sm:p-8 border-2 border-sky-300/70 text-center">
+      <div class="inline-flex items-center gap-2 px-4 py-1 rounded-full bg-sky-500/30 border border-sky-300/50 text-sky-200 text-xs font-extrabold uppercase tracking-widest mb-3">
+        🤽‍♂️ 3D ARCADE WATER POLO CHAMPIONSHIP
+      </div>
+      <h1 class="arcade-font text-4xl sm:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-b from-white via-sky-100 to-cyan-300 drop-shadow">
+        AQUA LEGEND
+      </h1>
+      <p class="text-sky-100/90 text-sm sm:text-base font-bold max-w-lg mx-auto mt-2">
+        Authentic 7v7 tactical water polo in a tropical island stadium! Swim, call for passes, lob over defenders, and fire rocket skip-shots past the keeper.
+      </p>
+
+      <!-- Difficulty & Match Length Selector -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-6 text-left">
+        <div class="bg-slate-900/70 rounded-2xl p-3.5 border border-sky-400/30">
+          <label class="text-[11px] font-black uppercase tracking-wider text-sky-300 block mb-1.5">AI Difficulty</label>
+          <div class="grid grid-cols-3 gap-1.5">
+            <button data-diff="rookie" class="diff-btn py-1.5 rounded-xl text-xs font-black bg-slate-800 text-sky-200 border border-slate-700">ROOKIE</button>
+            <button data-diff="pro" class="diff-btn py-1.5 rounded-xl text-xs font-black bg-sky-500 text-slate-950 border border-white">PRO</button>
+            <button data-diff="legend" class="diff-btn py-1.5 rounded-xl text-xs font-black bg-slate-800 text-sky-200 border border-slate-700">LEGEND</button>
+          </div>
+        </div>
+
+        <div class="bg-slate-900/70 rounded-2xl p-3.5 border border-sky-400/30">
+          <label class="text-[11px] font-black uppercase tracking-wider text-sky-300 block mb-1.5">Quarter Duration</label>
+          <div class="grid grid-cols-3 gap-1.5">
+            <button data-qlen="60" class="qlen-btn py-1.5 rounded-xl text-xs font-black bg-slate-800 text-sky-200 border border-slate-700">1 MIN</button>
+            <button data-qlen="120" class="qlen-btn py-1.5 rounded-xl text-xs font-black bg-sky-500 text-slate-950 border border-white">2 MIN</button>
+            <button data-qlen="180" class="qlen-btn py-1.5 rounded-xl text-xs font-black bg-slate-800 text-sky-200 border border-slate-700">3 MIN</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Primary Menu Actions -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5">
+        <button id="btn-play-solo" class="arcade-btn sm:col-span-3 py-4 rounded-2xl bg-gradient-to-r from-emerald-400 via-teal-400 to-cyan-400 border-2 border-white arcade-font text-2xl font-black text-slate-950">
+          🏊‍♂️ PLAY QUICK MATCH (7v7)
+        </button>
+
+        <button id="btn-open-custom" class="arcade-btn py-3 rounded-2xl bg-gradient-to-b from-sky-500 to-blue-600 border border-sky-200 font-black text-white text-sm">
+          🎨 ATHLETE & TEAM
+        </button>
+
+        <button id="btn-open-multi" class="arcade-btn py-3 rounded-2xl bg-gradient-to-b from-purple-500 to-indigo-600 border border-purple-200 font-black text-white text-sm">
+          🌐 1v1 ONLINE
+        </button>
+
+        <button id="btn-open-rules" class="arcade-btn py-3 rounded-2xl bg-gradient-to-b from-amber-500 to-orange-600 border border-amber-200 font-black text-white text-sm">
+          📖 CONTROLS & RULES
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Athlete & Team Customization Modal -->
+  <div id="custom-modal" class="overlay-layer hidden z-50 flex items-center justify-center p-4 bg-slate-950/65">
+    <div class="glass-panel interactive max-w-xl w-full rounded-3xl p-6 border-2 border-sky-300 max-h-[90vh] overflow-y-auto custom-scroll">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="arcade-font text-2xl font-black text-white">🎨 ATHLETE & TEAM SETUP</h2>
+        <button id="btn-close-custom" class="arcade-btn w-9 h-9 rounded-xl bg-rose-500 text-white font-black">✕</button>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <label class="text-xs font-black uppercase text-sky-300 block mb-1">Your Athlete Name & Cap #</label>
+          <div class="flex gap-2">
+            <input id="input-player-name" type="text" maxlength="14" value="ALEX" class="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-sky-400/50 text-white font-bold text-sm focus:outline-none" />
+            <input id="input-cap-num" type="number" min="2" max="13" value="7" class="w-20 px-3 py-2 rounded-xl bg-slate-900 border border-sky-400/50 text-white font-black text-center text-sm focus:outline-none" />
+          </div>
+        </div>
+
+        <div>
+          <label class="text-xs font-black uppercase text-sky-300 block mb-1.5">Playstyle Archetype</label>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <button data-arch="shooter" class="arch-btn p-3 rounded-2xl bg-sky-500/30 border-2 border-sky-300 text-left">
+              <div class="font-black text-white text-sm">🎯 Sniper</div>
+              <div class="text-[11px] text-sky-200 mt-0.5">+20% Shot Speed<br/>Skill: Power Skip</div>
+            </button>
+            <button data-arch="sprinter" class="arch-btn p-3 rounded-2xl bg-slate-900/80 border border-slate-700 text-left">
+              <div class="font-black text-white text-sm">⚡ Torpedo</div>
+              <div class="text-[11px] text-sky-200 mt-0.5">+18% Swim Speed<br/>Skill: Aqua Dash</div>
+            </button>
+            <button data-arch="defender" class="arch-btn p-3 rounded-2xl bg-slate-900/80 border border-slate-700 text-left">
+              <div class="font-black text-white text-sm">🛡️ Enforcer</div>
+              <div class="text-[11px] text-sky-200 mt-0.5">+25% Tackle Power<br/>Skill: Titan Wall</div>
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label class="text-xs font-black uppercase text-sky-300 block mb-1.5">Team Cap & Suit Color</label>
+          <div class="flex flex-wrap gap-2.5">
+            <button data-color="#0284c7" class="color-btn w-10 h-10 rounded-full bg-sky-600 border-4 border-white shadow"></button>
+            <button data-color="#10b981" class="color-btn w-10 h-10 rounded-full bg-emerald-500 border-2 border-slate-700 shadow"></button>
+            <button data-color="#f59e0b" class="color-btn w-10 h-10 rounded-full bg-amber-500 border-2 border-slate-700 shadow"></button>
+            <button data-color="#8b5cf6" class="color-btn w-10 h-10 rounded-full bg-violet-500 border-2 border-slate-700 shadow"></button>
+            <button data-color="#ec4899" class="color-btn w-10 h-10 rounded-full bg-pink-500 border-2 border-slate-700 shadow"></button>
+          </div>
+        </div>
+      </div>
+
+      <button id="btn-save-custom" class="arcade-btn mt-6 w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-400 to-cyan-400 text-slate-950 font-black text-base">
+        SAVE & RETURN
+      </button>
+    </div>
+  </div>
+
+  <!-- Multiplayer PeerJS Modal -->
+  <div id="multi-modal" class="overlay-layer hidden z-50 flex items-center justify-center p-4 bg-slate-950/65">
+    <div class="glass-panel interactive max-w-md w-full rounded-3xl p-6 border-2 border-purple-300 text-center">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="arcade-font text-2xl font-black text-white">🌐 1v1 PEER-TO-PEER</h2>
+        <button id="btn-close-multi" class="arcade-btn w-9 h-9 rounded-xl bg-rose-500 text-white font-black">✕</button>
+      </div>
+      <p class="text-xs text-sky-200 font-bold mb-4">
+        Share your Room Code with a friend to play live 1v1 with 6 AI teammates each!
+      </p>
+
+      <div class="bg-slate-900/90 rounded-2xl p-3.5 border border-purple-400/40 mb-4">
+        <div class="text-[10px] font-black uppercase text-purple-300">Your Room Code</div>
+        <div id="peer-my-id" class="arcade-font text-lg font-black text-white mt-1 select-all">Initializing...</div>
+        <button id="btn-copy-peer" class="mt-2 px-3 py-1 rounded-lg bg-purple-500/30 border border-purple-400 text-xs font-bold text-purple-200">
+          📋 Copy Room Code
+        </button>
+      </div>
+
+      <div class="flex gap-2">
+        <input id="peer-join-input" type="text" placeholder="Enter Friend's Code..." class="flex-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-sky-400/50 text-white font-bold text-sm focus:outline-none" />
+        <button id="btn-peer-connect" class="arcade-btn px-4 py-2.5 rounded-xl bg-emerald-400 text-slate-950 font-black text-sm">
+          JOIN
+        </button>
+      </div>
+      <div id="peer-status" class="mt-3 text-xs font-bold text-amber-300">Ready to host or connect.</div>
+    </div>
+  </div>
+
+  <!-- Rules & Controls Modal -->
+  <div id="rules-modal" class="overlay-layer hidden z-50 flex items-center justify-center p-4 bg-slate-950/65">
+    <div class="glass-panel interactive max-w-lg w-full rounded-3xl p-6 border-2 border-amber-300 max-h-[88vh] overflow-y-auto custom-scroll">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="arcade-font text-2xl font-black text-white">📖 CONTROLS & WATER POLO RULES</h2>
+        <button id="btn-close-rules" class="arcade-btn w-9 h-9 rounded-xl bg-rose-500 text-white font-black">✕</button>
+      </div>
+      <div class="space-y-3 text-xs sm:text-sm text-sky-100 font-semibold">
+        <div class="bg-slate-900/80 p-3 rounded-2xl border border-sky-400/30">
+          <div class="font-black text-amber-300 mb-1">🏊‍♂️ MOVEMENT & BALL CONTROL</div>
+          <p>• <b>WASD / Arrow Keys:</b> Swim in any direction. Hold <b>SHIFT</b> to Sprint.</p>
+          <p>• <b>Left-Click (Hold & Release):</b> Charge shot power and fire toward the goal.</p>
+          <p>• <b>E Key (With Ball):</b> Pass directly to the nearest teammate you are facing.</p>
+          <p>• <b>C Key:</b> Call for a pass from your ball-carrying teammate.</p>
+          <p>• <b>F Key:</b> High arc <b>Lob Pass</b> over defenders to an open teammate.</p>
+          <p>• <b>Q Key:</b> Switch control to the field player closest to the ball.</p>
+        </div>
+        <div class="bg-slate-900/80 p-3 rounded-2xl border border-sky-400/30">
+          <div class="font-black text-rose-300 mb-1">🛡️ DEFENSE & TACKLE CLASH</div>
+          <p>• <b>Left-Click / E (Off Ball):</b> Lunge to tackle an opponent holding the ball (3s cooldown).</p>
+          <p>• <b>B Key:</b> Jump high out of the water to <b>Block</b> incoming shots or passes.</p>
+          <p>• <b>Tackle Clash:</b> When you tackle or get tackled, rapidly tap <b>SPACE</b> for 3 seconds to win possession and gain a 3-second tackle shield!</p>
+        </div>
+        <div class="bg-slate-900/80 p-3 rounded-2xl border border-sky-400/30">
+          <div class="font-black text-emerald-300 mb-1">⏱️ OFFICIAL RULES</div>
+          <p>• <b>30-Second Shot Clock:</b> Your team must shoot within 30 seconds or possession turns over.</p>
+          <p>• <b>10% Shot Block Chance:</b> Shots fired through tight traffic can be deflected into open water.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pause / Match Over Modal -->
+  <div id="pause-modal" class="overlay-layer hidden z-50 flex items-center justify-center p-4 bg-slate-950/65">
+    <div class="glass-panel interactive max-w-sm w-full rounded-3xl p-6 border-2 border-sky-300 text-center">
+      <h2 id="pause-title" class="arcade-font text-3xl font-black text-white">MATCH PAUSED</h2>
+      <p id="pause-subtitle" class="text-sky-200 text-sm font-bold mt-1">Take a breather poolside.</p>
+      <div id="final-score-box" class="hidden my-4 p-4 rounded-2xl bg-slate-900/90 border border-amber-400/50">
+        <div class="text-xs font-black text-amber-300 uppercase">FINAL SCORE</div>
+        <div id="final-score-text" class="arcade-font text-3xl font-black text-white mt-1">SHARKS 0 - 0 TITANS</div>
+      </div>
+      <div class="space-y-2.5 mt-5">
+        <button id="btn-resume" class="arcade-btn w-full py-3 rounded-2xl bg-emerald-400 text-slate-950 font-black text-base">
+          ▶ RESUME MATCH
+        </button>
+        <button id="btn-restart" class="arcade-btn w-full py-3 rounded-2xl bg-sky-500 text-white font-black text-base">
+          🔄 RESTART MATCH
+        </button>
+        <button id="btn-quit-menu" class="arcade-btn w-full py-3 rounded-2xl bg-slate-800 border border-slate-600 text-sky-200 font-black text-sm">
+          🏠 MAIN MENU
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // =========================================================================
+    // 1. PROCEDURAL WEB AUDIO SYNTHESIZER (Zero External Sound URLs)
+    // =========================================================================
+    class SoundEngine {
+      constructor() {
+        this.ctx = null;
+        this.muted = false;
+      }
+      _ensure() {
+        if (!this.ctx) {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          if (AudioCtx) this.ctx = new AudioCtx();
+        }
+        if (this.ctx && this.ctx.state === 'suspended') {
+          this.ctx.resume().catch(() => {});
+        }
+      }
+      playPing(freq = 520, duration = 0.14, type = 'sine', gainVal = 0.18) {
+        if (this.muted) return;
+        this._ensure();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, now);
+        osc.frequency.exponentialRampToValueAtTime(freq * 1.25, now + duration);
+        gain.gain.setValueAtTime(gainVal, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + duration);
+      }
+      playWhistle() {
+        if (this.muted) return;
+        this._ensure();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const lfo = this.ctx.createOscillator();
+        const lfoGain = this.ctx.createGain();
+        const gain = this.ctx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(2850, now);
+        osc.frequency.linearRampToValueAtTime(3100, now + 0.12);
+        osc.frequency.linearRampToValueAtTime(2750, now + 0.45);
+
+        lfo.frequency.value = 38;
+        lfoGain.gain.value = 95;
+        lfo.connect(lfoGain);
+        lfoGain.connect(osc.frequency);
+
+        gain.gain.setValueAtTime(0.001, now);
+        gain.gain.linearRampToValueAtTime(0.22, now + 0.04);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.48);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        lfo.start(now);
+        osc.stop(now + 0.5);
+        lfo.stop(now + 0.5);
+      }
+      playSplash(intensity = 0.6) {
+        if (this.muted) return;
+        this._ensure();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const bufferSize = Math.floor(this.ctx.sampleRate * 0.25);
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.35));
+        }
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = buffer;
+
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(650, now);
+        filter.Q.value = 1.2;
+
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.22 * intensity, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+        noise.start(now);
+      }
+      playShot(power = 0.8) {
+        if (this.muted) return;
+        this._ensure();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(220 + power * 180, now);
+        osc.frequency.exponentialRampToValueAtTime(65, now + 0.22);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.23);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.24);
+        this.playSplash(0.7);
+      }
+      playGoalHorn() {
+        if (this.muted) return;
+        this._ensure();
+        if (!this.ctx) return;
+        const freqs = [261.63, 329.63, 392.0, 523.25];
+        freqs.forEach((f, idx) => {
+          setTimeout(() => this.playPing(f, 0.42, 'sawtooth', 0.12), idx * 75);
+        });
+      }
+    }
+
+    const sfx = new SoundEngine();
+
+    // =========================================================================
+    // 2. UI HELPER: FLOATING CALLOUTS
+    // =========================================================================
+    function spawnCallout(text, x, y, colorClass = 'text-amber-300', sizeClass = 'text-base') {
+      const layer = document.getElementById('callout-layer');
+      if (!layer) return;
+      const el = document.createElement('div');
+      el.className = `callout-anim absolute font-black uppercase tracking-wider drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)] ${colorClass} ${sizeClass}`;
+      el.style.left = `${Math.max(40, Math.min(window.innerWidth - 40, x))}px`;
+      el.style.top = `${Math.max(50, Math.min(window.innerHeight - 60, y))}px`;
+      el.textContent = text;
+      layer.appendChild(el);
+      setTimeout(() => el.remove(), 1250);
+    }
+
+    // =========================================================================
+    // 3. ARCHETYPE DEFINITIONS & POOL CONSTANTS
+    // =========================================================================
+    const ARCHETYPES = {
+      shooter: {
+        label: 'SNIPER',
+        speedMult: 1.0,
+        shotMult: 1.2,
+        tackleMult: 1.0,
+        staminaRegenMult: 1.0,
+        skill1: { name: 'Power Skip', cd: 12 },
+        skill2: { name: 'Quick Release', cd: 10 }
+      },
+      sprinter: {
+        label: 'TORPEDO',
+        speedMult: 1.18,
+        shotMult: 1.0,
+        tackleMult: 0.95,
+        staminaRegenMult: 1.2,
+        skill1: { name: 'Aqua Dash', cd: 9 },
+        skill2: { name: 'Wave Surge', cd: 12 }
+      },
+      defender: {
+        label: 'ENFORCER',
+        speedMult: 0.98,
+        shotMult: 0.98,
+        tackleMult: 1.25,
+        staminaRegenMult: 1.1,
+        skill1: { name: 'Titan Wall', cd: 11 },
+        skill2: { name: 'Steal Lunge', cd: 10 }
+      }
+    };
+
+    const POOL_LENGTH = 28; // X: -14 to +14
+    const POOL_WIDTH = 18;  // Z: -9 to +9
+    const HALF_L = POOL_LENGTH / 2;
+    const HALF_W = POOL_WIDTH / 2;
+    const GOAL_WIDTH = 3.2;
+    const GOAL_HEIGHT = 1.15;
+
+    // =========================================================================
+    // 4. MAIN 3D WATER POLO GAME ENGINE
+    // =========================================================================
+    class AquaLegendGame {
+      constructor() {
+        this.canvas = document.getElementById('game-canvas');
+        this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.renderer.shadowMap.enabled = true;
+        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+        this.scene = new THREE.Scene();
+        this.scene.background = new THREE.Color('#38bdf8');
+        this.scene.fog = new THREE.FogExp2('#38bdf8', 0.0085);
+
+        this.camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.1, 220);
+        this.cameraMode = 0; // 0: Broadcast Elevated, 1: Dynamic Follow, 2: Endline Tactical
+        this.camPos = new THREE.Vector3(0, 17, 23);
+        this.camLook = new THREE.Vector3(0, 0.5, 0);
+
+        // Match & Player Settings
+        this.mode = 'MENU'; // MENU | COUNTDOWN | PLAYING | GOAL_PAUSE | TACKLE_CLASH | PAUSED | GAMEOVER
+        this.difficulty = 'pro';
+        this.quarterDuration = 120;
+        this.quarter = 1;
+        this.gameClock = 120;
+        this.shotClock = 30;
+        this.countdownTimer = 5.0;
+        this.goalPauseTimer = 0;
+
+        this.blueScore = 0;
+        this.redScore = 0;
+        this.blueColor = '#0284c7';
+        this.redColor = '#e11d48';
+        this.userName = 'ALEX';
+        this.userCapNum = 7;
+        this.userArchetypeKey = 'shooter';
+
+        // Input States
+        this.keys = {};
+        this.isChargingShot = false;
+        this.shotCharge = 0;
+        this.mouseDownTime = 0;
+        this.callPassCooldown = 0;
+        this.lobPassCooldown = 0;
+
+        // Tackle Clash State
+        this.clashState = null;
+
+        // Entities
+        this.players = [];
+        this.controlledPlayer = null;
+        this.ball = null;
+        this.waterMesh = null;
+        this.blueGoalNet = null;
+        this.redGoalNet = null;
+        this.netRippleTimer = 0;
+        this.netRippleSide = null;
+        this.spectators = [];
+        this.particles = [];
+        this.ripples = [];
+        this.cheerTimer = 0;
+
+        // Multiplayer PeerJS State
+        this.peer = null;
+        this.conn = null;
+        this.isHost = true;
+
+        // Initialize Scene & Entities
+        this._setupLighting();
+        this._buildStadiumAndIsland();
+        this._createBall();
+        this._spawnRoster();
+        this._bindUIAndControls();
+        this._initPeerJS();
+
+        window.addEventListener('resize', () => this._onResize());
+        this.lastTime = performance.now();
+        requestAnimationFrame((t) => this._loop(t));
+      }
+
+      // =====================================================================
+      // 5. 3D STADIUM, CRYSTAL-BLUE WATER & TROPICAL ISLAND SCENERY
+      // =====================================================================
+      _setupLighting() {
+        const hemi = new THREE.HemisphereLight('#fff7ed', '#0369a1', 0.92);
+        this.scene.add(hemi);
+
+        const sun = new THREE.DirectionalLight('#fffbeb', 1.22);
+        sun.position.set(18, 34, 16);
+        sun.castShadow = true;
+        sun.shadow.mapSize.width = 1024;
+        sun.shadow.mapSize.height = 1024;
+        sun.shadow.camera.near = 5;
+        sun.shadow.camera.far = 85;
+        const d = 26;
+        sun.shadow.camera.left = -d;
+        sun.shadow.camera.right = d;
+        sun.shadow.camera.top = d;
+        sun.shadow.camera.bottom = -d;
+        this.scene.add(sun);
+
+        const rimLight = new THREE.DirectionalLight('#7dd3fc', 0.35);
+        rimLight.position.set(-20, 14, -18);
+        this.scene.add(rimLight);
+      }
+
+      _createPoolTileTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#0369a1';
+        ctx.fillRect(0, 0, 128, 128);
+        return new THREE.CanvasTexture(canvas);
+      }
+
+      _buildStadiumAndIsland() {
+        // 1. Surrounding Tropical Turquoise Ocean
+        const oceanGeo = new THREE.PlaneGeometry(280, 280);
+        const oceanMat = new THREE.MeshStandardMaterial({ color: '#0ea5e9', roughness: 0.3, metalness: 0.12 });
+        const ocean = new THREE.Mesh(oceanGeo, oceanMat);
+        ocean.rotation.x = -Math.PI / 2;
+        ocean.position.y = -0.35;
+        this.scene.add(ocean);
+
+        // Soft White Shoreline Foam Ring around Island
+        const foamGeo = new THREE.RingGeometry(47.5, 50.5, 48);
+        const foamMat = new THREE.MeshBasicMaterial({
+          color: '#e0f2fe',
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.55
+        });
+        const foamRing = new THREE.Mesh(foamGeo, foamMat);
+        foamRing.rotation.x = -Math.PI / 2;
+        foamRing.position.y = -0.28;
+        this.scene.add(foamRing);
+
+        // 2. Sandy Tropical Island Base
+        const sandGeo = new THREE.CylinderGeometry(48, 54, 0.6, 40);
+        const sandMat = new THREE.MeshStandardMaterial({ color: '#fde68a', roughness: 0.85 });
+        const sand = new THREE.Mesh(sandGeo, sandMat);
+        sand.position.y = -0.22;
+        sand.receiveShadow = true;
+        this.scene.add(sand);
+
+        // 3. Lush Island Lawn Ring (Cut out around the pool so pool water stays pure crystal blue!)
+        const lawnShape = new THREE.Shape();
+        lawnShape.absarc(0, 0, 41.5, 0, Math.PI * 2, false);
+        const poolHole = new THREE.Path();
+        const marginX = HALF_L + 2.4;
+        const marginZ = HALF_W + 2.4;
+        poolHole.moveTo(-marginX, -marginZ);
+        poolHole.lineTo(marginX, -marginZ);
+        poolHole.lineTo(marginX, marginZ);
+        poolHole.lineTo(-marginX, marginZ);
+        poolHole.closePath();
+        lawnShape.holes.push(poolHole);
+
+        const lawnGeo = new THREE.ShapeGeometry(lawnShape, 36);
+        const lawnMat = new THREE.MeshStandardMaterial({ color: '#22c55e', roughness: 0.78 });
+        const lawn = new THREE.Mesh(lawnGeo, lawnMat);
+        lawn.rotation.x = -Math.PI / 2;
+        lawn.position.y = 0.09;
+        lawn.receiveShadow = true;
+        this.scene.add(lawn);
+
+        // 4. Tiled Pool Basin Floor, Inner Walls & Sunlit Stone Pool Deck
+        const tileTex = this._createPoolTileTexture();
+        const poolFloorGeo = new THREE.PlaneGeometry(POOL_LENGTH, POOL_WIDTH);
+        const poolFloorMat = new THREE.MeshStandardMaterial({
+          map: tileTex,
+          color: '#0284c7',
+          roughness: 0.35
+        });
+        const poolFloor = new THREE.Mesh(poolFloorGeo, poolFloorMat);
+        poolFloor.rotation.x = -Math.PI / 2;
+        poolFloor.position.y = -1.25;
+        poolFloor.receiveShadow = true;
+        this.scene.add(poolFloor);
+
+        // Inner Pool Tiled Walls
+        const wallMat = new THREE.MeshStandardMaterial({ map: tileTex, color: '#0369a1', roughness: 0.4 });
+        const sideWallGeo = new THREE.BoxGeometry(POOL_LENGTH, 1.4, 0.2);
+        const northWall = new THREE.Mesh(sideWallGeo, wallMat);
+        northWall.position.set(0, -0.55, -HALF_W);
+        this.scene.add(northWall);
+        const southWall = new THREE.Mesh(sideWallGeo, wallMat);
+        southWall.position.set(0, -0.55, HALF_W);
+        this.scene.add(southWall);
+
+        // Pool Deck Borders + Blue Pool Coping Trim
+        const deckMat = new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.6 });
+        const copingMat = new THREE.MeshStandardMaterial({ color: '#0ea5e9', roughness: 0.35 });
+        const sideDeckGeo = new THREE.BoxGeometry(POOL_LENGTH + 4.8, 0.5, 2.4);
+        const topDeck = new THREE.Mesh(sideDeckGeo, deckMat);
+        topDeck.position.set(0, 0.12, -HALF_W - 1.2);
+        topDeck.receiveShadow = true;
+        this.scene.add(topDeck);
+
+        const botDeck = new THREE.Mesh(sideDeckGeo, deckMat);
+        botDeck.position.set(0, 0.12, HALF_W + 1.2);
+        botDeck.receiveShadow = true;
+        this.scene.add(botDeck);
+
+        const endDeckGeo = new THREE.BoxGeometry(2.4, 0.5, POOL_WIDTH);
+        const leftDeck = new THREE.Mesh(endDeckGeo, deckMat);
+        leftDeck.position.set(-HALF_L - 1.2, 0.12, 0);
+        leftDeck.receiveShadow = true;
+        this.scene.add(leftDeck);
+
+        const rightDeck = new THREE.Mesh(endDeckGeo, deckMat);
+        rightDeck.position.set(HALF_L + 1.2, 0.12, 0);
+        rightDeck.receiveShadow = true;
+        this.scene.add(rightDeck);
+
+        // Crisp Blue Pool Coping Rim
+        const rimLongGeo = new THREE.BoxGeometry(POOL_LENGTH + 0.6, 0.14, 0.32);
+        [-HALF_W - 0.12, HALF_W + 0.12].forEach(z => {
+          const rim = new THREE.Mesh(rimLongGeo, copingMat);
+          rim.position.set(0, 0.36, z);
+          this.scene.add(rim);
+        });
+
+        // 5. Entirely Blue Pool Water Surface (Uniform pure blue, no white-and-blue streaks)
+        const waterGeo = new THREE.PlaneGeometry(POOL_LENGTH, POOL_WIDTH, 48, 32);
+        const waterMat = new THREE.MeshLambertMaterial({
+          color: '#0284c7',
+          emissive: '#0369a1',
+          emissiveIntensity: 0.65
+        });
+        this.waterMesh = new THREE.Mesh(waterGeo, waterMat);
+        this.waterMesh.rotation.x = -Math.PI / 2;
+        this.waterMesh.position.y = 0.05;
+        this.waterMesh.receiveShadow = true;
+        this.scene.add(this.waterMesh);
+
+        // 6. Floating Zone Lane Markers & Buoy Ropes along Pool Sidelines
+        this._buildSidelineMarkers();
+
+        // 7. Floating Water Polo Goals (Left & Right)
+        this.blueGoalNet = this._buildGoal(-HALF_L + 0.15, '#0284c7', 1);
+        this.redGoalNet = this._buildGoal(HALF_L - 0.15, '#e11d48', -1);
+
+        // 8. Grandstands, Jumbotron Arch, Cheering Spectators & Tropical Resort Scenery
+        this._buildGrandstandsAndCrowd();
+        this._buildTropicalSurroundings();
+      }
+
+      _buildSidelineMarkers() {
+        const markerZones = [
+          { x: 0, color: '#ffffff' },
+          { x: -HALF_L + 2, color: '#ef4444' },
+          { x: HALF_L - 2, color: '#ef4444' },
+          { x: -HALF_L + 5, color: '#facc15' },
+          { x: HALF_L - 5, color: '#facc15' }
+        ];
+
+        markerZones.forEach(m => {
+          [-HALF_W - 0.35, HALF_W + 0.35].forEach(z => {
+            const cone = new THREE.Mesh(
+              new THREE.ConeGeometry(0.18, 0.45, 10),
+              new THREE.MeshStandardMaterial({ color: m.color, roughness: 0.35 })
+            );
+            cone.position.set(m.x, 0.58, z);
+            cone.castShadow = true;
+            this.scene.add(cone);
+          });
+        });
+
+        // Floating Buoyant Lane Ropes
+        const buoyGeo = new THREE.SphereGeometry(0.08, 8, 8);
+        [-HALF_W + 0.18, HALF_W - 0.18].forEach(z => {
+          for (let x = -HALF_L + 0.4; x <= HALF_L - 0.4; x += 0.45) {
+            const distEnd = HALF_L - Math.abs(x);
+            let col = '#f8fafc';
+            if (distEnd <= 2.0) col = '#ef4444';
+            else if (distEnd <= 5.0) col = '#facc15';
+            const buoy = new THREE.Mesh(buoyGeo, new THREE.MeshStandardMaterial({ color: col, roughness: 0.3 }));
+            buoy.position.set(x, 0.1, z);
+            this.scene.add(buoy);
+          }
+        });
+      }
+
+      _createNetTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, 128, 128);
+        ctx.strokeStyle = 'rgba(248, 250, 252, 0.88)';
+        ctx.lineWidth = 4;
+        for (let i = 0; i <= 128; i += 16) {
+          ctx.beginPath();
+          ctx.moveTo(i, 0);
+          ctx.lineTo(i, 128);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(0, i);
+          ctx.lineTo(128, i);
+          ctx.stroke();
+        }
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(4, 2);
+        return tex;
+      }
+
+      _buildGoal(xPos, teamHex, facingDir) {
+        const group = new THREE.Group();
+        group.position.set(xPos, 0.08, 0);
+
+        const postMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.25, metalness: 0.15 });
+        const floatMat = new THREE.MeshStandardMaterial({ color: teamHex, roughness: 0.4 });
+        const netTex = this._createNetTexture();
+        const netMat = new THREE.MeshStandardMaterial({
+          map: netTex,
+          transparent: true,
+          side: THREE.DoubleSide,
+          roughness: 0.7
+        });
+
+        const halfW = GOAL_WIDTH / 2;
+        const depth = 1.25;
+
+        // Floating side pontoons
+        const pontoonGeo = new THREE.BoxGeometry(depth, 0.16, 0.22);
+        [-halfW, halfW].forEach(z => {
+          const p = new THREE.Mesh(pontoonGeo, floatMat);
+          p.position.set(-facingDir * (depth / 2), 0.04, z);
+          p.castShadow = true;
+          group.add(p);
+        });
+
+        // Front white posts & crossbar
+        const postGeo = new THREE.CylinderGeometry(0.055, 0.055, GOAL_HEIGHT, 12);
+        [-halfW, halfW].forEach(z => {
+          const post = new THREE.Mesh(postGeo, postMat);
+          post.position.set(0, GOAL_HEIGHT / 2, z);
+          post.castShadow = true;
+          group.add(post);
+        });
+
+        const crossbar = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.055, 0.055, GOAL_WIDTH + 0.11, 12),
+          postMat
+        );
+        crossbar.rotation.x = Math.PI / 2;
+        crossbar.position.set(0, GOAL_HEIGHT, 0);
+        crossbar.castShadow = true;
+        group.add(crossbar);
+
+        // Rear support bars
+        const backBar = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.035, 0.035, GOAL_WIDTH, 10),
+          postMat
+        );
+        backBar.rotation.x = Math.PI / 2;
+        backBar.position.set(-facingDir * depth, GOAL_HEIGHT * 0.85, 0);
+        group.add(backBar);
+
+        // Woven Netting (Back, Sides, Top)
+        const backNet = new THREE.Mesh(new THREE.PlaneGeometry(GOAL_WIDTH, GOAL_HEIGHT, 10, 6), netMat);
+        backNet.rotation.y = facingDir > 0 ? Math.PI / 2 : -Math.PI / 2;
+        backNet.position.set(-facingDir * depth, GOAL_HEIGHT / 2, 0);
+        group.add(backNet);
+
+        const topNet = new THREE.Mesh(new THREE.PlaneGeometry(depth, GOAL_WIDTH), netMat);
+        topNet.rotation.x = Math.PI / 2;
+        topNet.position.set(-facingDir * (depth / 2), GOAL_HEIGHT * 0.92, 0);
+        group.add(topNet);
+
+        [-halfW, halfW].forEach(z => {
+          const sideNet = new THREE.Mesh(new THREE.PlaneGeometry(depth, GOAL_HEIGHT), netMat);
+          sideNet.position.set(-facingDir * (depth / 2), GOAL_HEIGHT / 2, z);
+          group.add(sideNet);
+        });
+
+        this.scene.add(group);
+        return backNet;
+      }
+
+      _buildGrandstandsAndCrowd() {
+        const standMat = new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 0.7 });
+        const roofMat = new THREE.MeshStandardMaterial({ color: '#0284c7', roughness: 0.45 });
+        const fanColors = ['#38bdf8', '#f43f5e', '#facc15', '#34d399', '#a78bfa', '#fb923c', '#f8fafc'];
+
+        // North & South Bleacher Stands
+        [-1, 1].forEach(side => {
+          const zBase = side * (HALF_W + 4.4);
+          for (let row = 0; row < 4; row++) {
+            const bench = new THREE.Mesh(new THREE.BoxGeometry(26, 0.55, 1.15), standMat);
+            bench.position.set(0, 0.35 + row * 0.55, zBase + side * row * 1.05);
+            bench.castShadow = true;
+            bench.receiveShadow = true;
+            this.scene.add(bench);
+
+            // Spectators on each row
+            for (let x = -11.5; x <= 11.5; x += 1.25) {
+              if (Math.random() < 0.14) continue;
+              const fanGroup = new THREE.Group();
+              const baseY = 0.85 + row * 0.55;
+              fanGroup.position.set(x + (Math.random() - 0.5) * 0.3, baseY, zBase + side * row * 1.05);
+
+              const shirtColor = fanColors[Math.floor(Math.random() * fanColors.length)];
+              const torso = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.16, 0.19, 0.44, 8),
+                new THREE.MeshStandardMaterial({ color: shirtColor })
+              );
+              const head = new THREE.Mesh(
+                new THREE.SphereGeometry(0.14, 8, 8),
+                new THREE.MeshStandardMaterial({ color: '#fed7aa' })
+              );
+              head.position.y = 0.33;
+              fanGroup.add(torso, head);
+              this.scene.add(fanGroup);
+
+              this.spectators.push({
+                mesh: fanGroup,
+                baseY,
+                phase: Math.random() * Math.PI * 2
+              });
+            }
+          }
+
+          // Resort Canopy Roof over Back Row
+          const roof = new THREE.Mesh(new THREE.BoxGeometry(27, 0.25, 4.6), roofMat);
+          roof.position.set(0, 3.65, zBase + side * 2.2);
+          roof.rotation.x = side * 0.12;
+          roof.castShadow = true;
+          this.scene.add(roof);
+        });
+
+        // Stadium Scoreboard Arch on North Side
+        const pillarMat = new THREE.MeshStandardMaterial({ color: '#0f172a', roughness: 0.5 });
+        [-7.5, 7.5].forEach(px => {
+          const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.28, 5.2, 10), pillarMat);
+          pillar.position.set(px, 2.6, -HALF_W - 8.6);
+          this.scene.add(pillar);
+        });
+        const board = new THREE.Mesh(
+          new THREE.BoxGeometry(16.2, 1.8, 0.5),
+          new THREE.MeshStandardMaterial({ color: '#0f172a', emissive: '#0284c7', emissiveIntensity: 0.35 })
+        );
+        board.position.set(0, 4.8, -HALF_W - 8.6);
+        this.scene.add(board);
+      }
+
+      _buildTropicalSurroundings() {
+        const trunkMat = new THREE.MeshStandardMaterial({ color: '#78350f', roughness: 0.85 });
+        const leafMat = new THREE.MeshStandardMaterial({ color: '#16a34a', roughness: 0.65 });
+        const flowerColors = ['#f43f5e', '#facc15', '#fb923c', '#e879f9'];
+
+        const palmSpots = [
+          [-22, -13], [22, -13], [-22, 13], [22, 13],
+          [-26, -4], [26, -4], [-26, 5], [26, 5],
+          [-18, -19], [18, -19], [-18, 19], [18, 19],
+          [-32, -16], [32, -16], [-32, 16], [32, 16]
+        ];
+
+        palmSpots.forEach(([px, pz], idx) => {
+          const palm = new THREE.Group();
+          palm.position.set(px, 0.1, pz);
+
+          const height = 4.6 + (idx % 3) * 1.1;
+          const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.28, height, 8), trunkMat);
+          trunk.position.y = height / 2;
+          trunk.rotation.z = (idx % 2 === 0 ? 1 : -1) * 0.08;
+          trunk.castShadow = true;
+          palm.add(trunk);
+
+          for (let f = 0; f < 6; f++) {
+            const frond = new THREE.Mesh(new THREE.ConeGeometry(0.55, 2.4, 5), leafMat);
+            const ang = (f / 6) * Math.PI * 2;
+            frond.position.set(Math.cos(ang) * 0.85, height - 0.1, Math.sin(ang) * 0.85);
+            frond.rotation.z = -Math.cos(ang) * 1.15;
+            frond.rotation.x = Math.sin(ang) * 1.15;
+            palm.add(frond);
+          }
+
+          this.scene.add(palm);
+
+          // Tropical Hibiscus Shrub near base
+          const bush = new THREE.Mesh(
+            new THREE.DodecahedronGeometry(0.65, 1),
+            new THREE.MeshStandardMaterial({ color: flowerColors[idx % flowerColors.length], roughness: 0.7 })
+          );
+          bush.position.set(px + 0.9, 0.45, pz + 0.5);
+          this.scene.add(bush);
+        });
+
+        // Beach Umbrellas & Lounge Chairs on the Sand
+        const umbrellaColors = ['#f43f5e', '#facc15', '#38bdf8', '#a855f7'];
+        [[-36, -8], [36, -8], [-36, 9], [36, 9]].forEach(([ux, uz], i) => {
+          const pole = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.05, 0.05, 2.4, 6),
+            new THREE.MeshStandardMaterial({ color: '#f8fafc' })
+          );
+          pole.position.set(ux, 1.1, uz);
+          const canopy = new THREE.Mesh(
+            new THREE.ConeGeometry(1.7, 0.75, 10),
+            new THREE.MeshStandardMaterial({ color: umbrellaColors[i % umbrellaColors.length] })
+          );
+          canopy.position.set(ux, 2.25, uz);
+          this.scene.add(pole, canopy);
+        });
+
+        // Distant Sailboats on the Turquoise Ocean
+        [[-64, -46], [68, -42], [62, 52]].forEach(([bx, bz]) => {
+          const boat = new THREE.Group();
+          boat.position.set(bx, -0.1, bz);
+          const hull = new THREE.Mesh(
+            new THREE.BoxGeometry(3.2, 0.6, 1.1),
+            new THREE.MeshStandardMaterial({ color: '#ffffff' })
+          );
+          const sail = new THREE.Mesh(
+            new THREE.ConeGeometry(1.3, 3.4, 4),
+            new THREE.MeshStandardMaterial({ color: '#fef08a' })
+          );
+          sail.position.y = 1.9;
+          boat.add(hull, sail);
+          this.scene.add(boat);
+        });
+      }
+
+      // =====================================================================
+      // 6. BALL, ATHLETES & ARTICULATED SWIMMER MESHES
+      // =====================================================================
+      _createBall() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#facc15';
+        ctx.fillRect(0, 0, 128, 128);
+        ctx.fillStyle = '#0284c7';
+        ctx.fillRect(0, 38, 128, 22);
+        ctx.fillStyle = '#e11d48';
+        ctx.fillRect(0, 74, 128, 22);
+
+        const tex = new THREE.CanvasTexture(canvas);
+        const geo = new THREE.SphereGeometry(0.22, 18, 18);
+        const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.35 });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.castShadow = true;
+        this.scene.add(mesh);
+
+        this.ball = {
+          mesh,
+          pos: new THREE.Vector3(0, 0.3, 0),
+          vel: new THREE.Vector3(0, 0, 0),
+          holder: null,
+          lastTouchTeam: null,
+          isPowerShot: false,
+          isSkipShot: false
+        };
+      }
+
+      _createAthleteMesh(team, capNum, isGK) {
+        const group = new THREE.Group();
+        const teamHex = team === 'blue' ? this.blueColor : this.redColor;
+        const skinMat = new THREE.MeshStandardMaterial({ color: '#f1c27d', roughness: 0.55 });
+        const suitMat = new THREE.MeshStandardMaterial({ color: teamHex, roughness: 0.45 });
+        const capMat = new THREE.MeshStandardMaterial({ color: isGK ? '#ef4444' : teamHex, roughness: 0.35 });
+
+        const bodyPivot = new THREE.Group();
+        group.add(bodyPivot);
+
+        // Torso
+        const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.2, 0.65, 10), skinMat);
+        torso.position.y = 0.05;
+        torso.castShadow = true;
+        bodyPivot.add(torso);
+
+        // Swim Trunks
+        const trunks = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.19, 0.24, 10), suitMat);
+        trunks.position.y = -0.32;
+        bodyPivot.add(trunks);
+
+        // Head & Water Polo Cap with Ear Guards
+        const headGroup = new THREE.Group();
+        headGroup.position.set(0, 0.54, 0);
+        bodyPivot.add(headGroup);
+
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.19, 14, 14), skinMat);
+        head.castShadow = true;
+        headGroup.add(head);
+
+        const cap = new THREE.Mesh(
+          new THREE.SphereGeometry(0.20, 14, 14, 0, Math.PI * 2, 0, Math.PI * 0.62),
+          capMat
+        );
+        headGroup.add(cap);
+
+        [-0.2, 0.2].forEach(ex => {
+          const earGuard = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.04, 8), capMat);
+          earGuard.rotation.z = Math.PI / 2;
+          earGuard.position.set(ex, -0.02, 0);
+          headGroup.add(earGuard);
+        });
+
+        // Goggles
+        const goggles = new THREE.Mesh(
+          new THREE.BoxGeometry(0.24, 0.07, 0.08),
+          new THREE.MeshStandardMaterial({ color: '#0f172a', roughness: 0.2 })
+        );
+        goggles.position.set(0, 0.04, 0.17);
+        headGroup.add(goggles);
+
+        // Articulated Shoulder-Pivoted Left & Right Arms
+        const makeArm = (sideSign) => {
+          const shoulder = new THREE.Group();
+          shoulder.position.set(sideSign * 0.30, 0.28, 0);
+          const armMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.055, 0.54, 8), skinMat);
+          armMesh.position.y = -0.24;
+          armMesh.castShadow = true;
+          shoulder.add(armMesh);
+          bodyPivot.add(shoulder);
+          return shoulder;
+        };
+        const leftShoulder = makeArm(-1);
+        const rightShoulder = makeArm(1);
+
+        // Controlled-Player Clear Overhead Beacon & Glowing Surface Ring
+        const ringGeo = new THREE.RingGeometry(0.56, 0.78, 32);
+        const ringMat = new THREE.MeshBasicMaterial({
+          color: '#bef264',
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.92
+        });
+        const selectRing = new THREE.Mesh(ringGeo, ringMat);
+        selectRing.rotation.x = -Math.PI / 2;
+        selectRing.position.y = 0.09;
+        selectRing.visible = false;
+        group.add(selectRing);
+
+        // Forward Directional Chevron on Water Surface
+        const chevronGeo = new THREE.ConeGeometry(0.24, 0.38, 3);
+        const chevronMat = new THREE.MeshBasicMaterial({ color: '#facc15' });
+        const chevron = new THREE.Mesh(chevronGeo, chevronMat);
+        chevron.rotation.x = Math.PI / 2;
+        chevron.position.set(0, 0.11, 0.95);
+        chevron.visible = false;
+        group.add(chevron);
+
+        // Large Bobbing Golden-Lime Overhead Arrow
+        const arrowGroup = new THREE.Group();
+        const arrowCone = new THREE.Mesh(
+          new THREE.ConeGeometry(0.28, 0.46, 4),
+          new THREE.MeshBasicMaterial({ color: '#bef264' })
+        );
+        arrowCone.rotation.x = Math.PI;
+        const arrowCollar = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.13, 0.13, 0.22, 8),
+          new THREE.MeshBasicMaterial({ color: '#0f172a' })
+        );
+        arrowCollar.position.y = 0.28;
+        arrowGroup.add(arrowCone, arrowCollar);
+        arrowGroup.position.set(0, 1.62, 0);
+        arrowGroup.visible = false;
+        group.add(arrowGroup);
+
+        this.scene.add(group);
+        return {
+          group,
+          bodyPivot,
+          leftShoulder,
+          rightShoulder,
+          selectRing,
+          chevron,
+          arrowGroup
+        };
+      }
+
+      _spawnRoster() {
+        this.players.forEach(p => this.scene.remove(p.mesh.group));
+        this.players = [];
+
+        // 7v7 Authentic Water Polo Formation Offsets (1 GK + 6 Field Players: Hole Set, Wings, Drivers, Point)
+        const formations = [
+          { role: 'GK', isGK: true, x: -HALF_L + 0.85, z: 0 },
+          { role: 'POINT', isGK: false, x: -2.2, z: 0 },
+          { role: 'LW', isGK: false, x: -1.4, z: -5.8 },
+          { role: 'RW', isGK: false, x: -1.4, z: 5.8 },
+          { role: 'LD', isGK: false, x: -4.8, z: -4.2 },
+          { role: 'RD', isGK: false, x: -4.8, z: 4.2 },
+          { role: 'HOLE', isGK: false, x: 3.5, z: 0 }
+        ];
+
+        const archKeys = ['shooter', 'sprinter', 'defender'];
+
+        ['blue', 'red'].forEach(team => {
+          const sign = team === 'blue' ? 1 : -1;
+          // Randomize which field player (index 1..6) the user spawns as
+          const userSlot = team === 'blue' ? (1 + Math.floor(Math.random() * 6)) : -1;
+
+          formations.forEach((f, idx) => {
+            const isUser = team === 'blue' && idx === userSlot;
+            const capNum = isUser ? this.userCapNum : (idx === 0 ? 1 : idx + 1);
+            const archKey = isUser ? this.userArchetypeKey : archKeys[idx % archKeys.length];
+            const meshParts = this._createAthleteMesh(team, capNum, f.isGK);
+
+            const player = {
+              id: `${team}_${idx}`,
+              team,
+              index: idx,
+              role: f.role,
+              isGK: f.isGK,
+              isUser,
+              name: isUser ? this.userName : `${team.toUpperCase()} #${capNum}`,
+              capNum,
+              archetypeKey: archKey,
+              archetype: ARCHETYPES[archKey],
+              mesh: meshParts,
+              pos: new THREE.Vector3(f.x * sign, 0, f.z * sign),
+              vel: new THREE.Vector3(0, 0, 0),
+              homePos: new THREE.Vector3(f.x * sign, 0, f.z * sign),
+              facing: team === 'blue' ? Math.PI / 2 : -Math.PI / 2,
+              stamina: 100,
+              tackleCooldown: 0,
+              tackleImmunity: 0,
+              stunTimer: 0,
+              blockTimer: 0,
+              diveTimer: 0,
+              diveDir: 0,
+              throwFollow: 0,
+              skill1Cd: 0,
+              skill2Cd: 0,
+              boostTimer: 0,
+              aiPhase: Math.random() * Math.PI * 2,
+              aiPassTimer: 1.5 + Math.random() * 2.0
+            };
+
+            meshParts.group.position.copy(player.pos);
+            meshParts.group.rotation.y = player.facing;
+            if (isUser) this.controlledPlayer = player;
+            this.players.push(player);
+          });
+        });
+
+        this._updateControlledVisuals();
+      }
+
+      _updateControlledVisuals() {
+        this.players.forEach(p => {
+          const active = p === this.controlledPlayer;
+          p.isUser = active;
+          p.mesh.selectRing.visible = active;
+          p.mesh.chevron.visible = active;
+          p.mesh.arrowGroup.visible = active;
+        });
+
+        if (this.controlledPlayer) {
+          const p = this.controlledPlayer;
+          document.getElementById('hud-cap-badge').textContent = p.capNum;
+          document.getElementById('hud-player-name').textContent = `${p.name} #${p.capNum}`;
+          document.getElementById('hud-player-role').textContent = p.archetype.label;
+          document.getElementById('hud-skill1-name').textContent = p.archetype.skill1.name;
+          document.getElementById('hud-skill2-name').textContent = p.archetype.skill2.name;
+        }
+      }
+
+      // =====================================================================
+      // 7. WATER SPLASHES & EXPANDING RIPPLE RINGS
+      // =====================================================================
+      _spawnSplash(pos, count = 10, power = 1.0) {
+        for (let i = 0; i < count; i++) {
+          const drop = new THREE.Mesh(
+            new THREE.SphereGeometry(0.055 + Math.random() * 0.04, 6, 6),
+            new THREE.MeshBasicMaterial({ color: '#bae6fd', transparent: true, opacity: 0.9 })
+          );
+          drop.position.set(pos.x, Math.max(0.12, pos.y), pos.z);
+          const ang = Math.random() * Math.PI * 2;
+          const spd = (1.2 + Math.random() * 2.6) * power;
+          const vel = new THREE.Vector3(
+            Math.cos(ang) * spd,
+            (2.4 + Math.random() * 3.0) * power,
+            Math.sin(ang) * spd
+          );
+          this.scene.add(drop);
+          this.particles.push({ mesh: drop, vel, life: 0.45 + Math.random() * 0.25 });
+        }
+        this._spawnWaterRipple(pos.x, pos.z, 1.2 + power * 0.5);
+      }
+
+      _spawnWaterRipple(x, z, maxScale = 1.4) {
+        const geo = new THREE.RingGeometry(0.18, 0.30, 28);
+        const mat = new THREE.MeshBasicMaterial({
+          color: '#0ea5e9',
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.78
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.position.set(x, 0.11, z);
+        this.scene.add(mesh);
+        this.ripples.push({
+          mesh,
+          mat,
+          age: 0,
+          duration: 0.75,
+          maxScale
+        });
+      }
+
+      _updateParticles(dt) {
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+          const pt = this.particles[i];
+          pt.life -= dt;
+          if (pt.life <= 0) {
+            this.scene.remove(pt.mesh);
+            this.particles.splice(i, 1);
+            continue;
+          }
+          pt.vel.y -= 13.5 * dt;
+          pt.mesh.position.addScaledVector(pt.vel, dt);
+        }
+
+        for (let i = this.ripples.length - 1; i >= 0; i--) {
+          const rp = this.ripples[i];
+          rp.age += dt;
+          if (rp.age >= rp.duration) {
+            this.scene.remove(rp.mesh);
+            this.ripples.splice(i, 1);
+            continue;
+          }
+          const t = rp.age / rp.duration;
+          const s = 1 + t * rp.maxScale;
+          rp.mesh.scale.set(s, s, 1);
+          rp.mat.opacity = 0.78 * (1 - t);
+        }
+      }
+
+      // =====================================================================
+      // 8. MATCH LIFECYCLE, COUNTDOWN & GOAL HANDLING
+      // =====================================================================
+      _startMatch() {
+        sfx._ensure();
+        this.blueScore = 0;
+        this.redScore = 0;
+        this.quarter = 1;
+        this.gameClock = this.quarterDuration;
+        this.shotClock = 30;
+        this.clashState = null;
+
+        document.getElementById('main-menu').classList.add('hidden');
+        document.getElementById('pause-modal').classList.add('hidden');
+        document.getElementById('tackle-clash-modal').classList.add('hidden');
+        document.getElementById('game-hud').classList.remove('hidden');
+
+        this._spawnRoster();
+        this.mode = 'COUNTDOWN';
+        this._resetPositionsForCountdown();
+      }
+
+      _resetPositionsForCountdown() {
+        this.mode = 'COUNTDOWN';
+        this.countdownTimer = 5.0;
+        this.shotClock = 30;
+        this.isChargingShot = false;
+        this.shotCharge = 0;
+        document.getElementById('shot-meter-wrap').classList.add('hidden');
+
+        // Place ball in center circle for swim-off
+        this.ball.holder = null;
+        this.ball.lastTouchTeam = null;
+        this.ball.isPowerShot = false;
+        this.ball.isSkipShot = false;
+        this.ball.pos.set(0, 0.32, 0);
+        this.ball.vel.set(0, 0, 0);
+        this.ball.mesh.position.copy(this.ball.pos);
+
+        // Line up both teams on their respective 2-meter swim-off lines
+        this.players.forEach(p => {
+          const sign = p.team === 'blue' ? -1 : 1;
+          if (p.isGK) {
+            p.pos.set(sign * (HALF_L - 0.85), 0, 0);
+          } else {
+            p.pos.set(sign * (HALF_L - 2.3), 0, p.homePos.z);
+          }
+          p.vel.set(0, 0, 0);
+          p.facing = p.team === 'blue' ? Math.PI / 2 : -Math.PI / 2;
+          p.stunTimer = 0;
+          p.blockTimer = 0;
+          p.diveTimer = 0;
+          p.tackleImmunity = 0;
+          p.mesh.group.position.copy(p.pos);
+          p.mesh.group.rotation.y = p.facing;
+        });
+
+        this._showBanner('SWIM-OFF IN', '5');
+        sfx.playPing(520, 0.14);
+      }
+
+      _showBanner(sub, main) {
+        const banner = document.getElementById('center-banner');
+        document.getElementById('center-banner-sub').textContent = sub;
+        document.getElementById('center-banner-main').textContent = main;
+        banner.classList.remove('hidden');
+        banner.classList.remove('banner-pop');
+        void banner.offsetWidth;
+        banner.classList.add('banner-pop');
+      }
+
+      _hideBanner() {
+        document.getElementById('center-banner').classList.add('hidden');
+      }
+
+      // =====================================================================
+      // 9. PLAYER ACTIONS: SHOOT, PASS, CALL PASS, LOB, BLOCK & TACKLE
+      // =====================================================================
+      _releaseShot(shooter, charge = 0.65, forceSkip = false) {
+        if (!shooter || this.ball.holder !== shooter) return;
+
+        const targetGoalX = shooter.team === 'blue' ? HALF_L + 0.55 : -HALF_L - 0.55;
+        const cornerZ = (Math.random() > 0.5 ? 1 : -1) * (GOAL_WIDTH * 0.36) + (Math.random() - 0.5) * 0.35;
+        const targetY = forceSkip ? 0.12 : (0.35 + charge * 0.58);
+        const targetPos = new THREE.Vector3(targetGoalX, targetY, cornerZ);
+
+        const releasePos = shooter.pos.clone().add(new THREE.Vector3(0, 0.72, 0));
+        const dx = targetPos.x - releasePos.x;
+        const dz = targetPos.z - releasePos.z;
+        const horizDist = Math.max(1.5, Math.hypot(dx, dz));
+
+        const baseSpeed = (14.5 + charge * 11.5) * shooter.archetype.shotMult;
+        const flightTime = horizDist / baseSpeed;
+        const gravity = 14.5;
+        const vy = (targetPos.y - releasePos.y) / flightTime + 0.5 * gravity * flightTime;
+
+        this.ball.holder = null;
+        this.ball.lastTouchTeam = shooter.team;
+        this.ball.pos.copy(releasePos);
+        this.ball.vel.set((dx / horizDist) * baseSpeed, vy, (dz / horizDist) * baseSpeed);
+        this.ball.isPowerShot = charge >= 0.78 || forceSkip;
+        this.ball.isSkipShot = forceSkip;
+
+        shooter.facing = Math.atan2(dx, dz);
+        shooter.throwFollow = 0.38;
+        shooter.stamina = Math.max(0, shooter.stamina - 4);
+        this.shotClock = 30;
+
+        sfx.playShot(charge);
+        this._spawnSplash(shooter.pos, 10, 0.8);
+
+        if (shooter.isUser) {
+          const screenPt = this._worldToScreen(shooter.pos);
+          spawnCallout(
+            forceSkip ? '⚡ POSEIDON SKIP!' : (charge >= 0.78 ? '🔥 POWER SHOT!' : 'SHOT!'),
+            screenPt.x,
+            screenPt.y - 35,
+            charge >= 0.78 ? 'text-amber-300' : 'text-sky-200',
+            'text-lg'
+          );
+        }
+      }
+
+      _passToTeammate(passer, targetMate, isLob = false) {
+        if (!passer || !targetMate || this.ball.holder !== passer) return;
+
+        const releasePos = passer.pos.clone().add(new THREE.Vector3(0, 0.68, 0));
+        const leadPos = targetMate.pos.clone().addScaledVector(targetMate.vel, 0.28);
+        const dx = leadPos.x - releasePos.x;
+        const dz = leadPos.z - releasePos.z;
+        const horizDist = Math.max(1.2, Math.hypot(dx, dz));
+
+        const passSpeed = isLob ? 10.5 : 13.8;
+        const flightTime = horizDist / passSpeed;
+        const gravity = 14.5;
+        const targetY = 0.52;
+        const vy = (targetY - releasePos.y) / flightTime + 0.5 * gravity * flightTime + (isLob ? 2.4 : 0);
+
+        this.ball.holder = null;
+        this.ball.lastTouchTeam = passer.team;
+        this.ball.pos.copy(releasePos);
+        this.ball.vel.set((dx / horizDist) * passSpeed, vy, (dz / horizDist) * passSpeed);
+        this.ball.isPowerShot = false;
+        this.ball.isSkipShot = false;
+
+        passer.facing = Math.atan2(dx, dz);
+        passer.throwFollow = 0.32;
+        sfx.playPing(isLob ? 620 : 480, 0.12, 'triangle', 0.15);
+      }
+
+      _findNearestFacingTeammate(passer) {
+        const fwd = new THREE.Vector3(Math.sin(passer.facing), 0, Math.cos(passer.facing));
+        let bestFacing = null;
+        let bestFacingScore = Infinity;
+        let nearestAny = null;
+        let nearestAnyDist = Infinity;
+
+        this.players.forEach(p => {
+          if (p === passer || p.team !== passer.team || p.isGK) return;
+          const toMate = new THREE.Vector3(p.pos.x - passer.pos.x, 0, p.pos.z - passer.pos.z);
+          const dist = toMate.length();
+          if (dist < 0.5) return;
+
+          if (dist < nearestAnyDist) {
+            nearestAnyDist = dist;
+            nearestAny = p;
+          }
+
+          const dir = toMate.clone().normalize();
+          const dot = fwd.dot(dir); // 1 = straight ahead, 0 = 90 deg side
+          if (dot > 0.25) {
+            const score = dist / (dot + 0.35);
+            if (score < bestFacingScore) {
+              bestFacingScore = score;
+              bestFacing = p;
+            }
+          }
+        });
+
+        return bestFacing || nearestAny;
+      }
+
+      _callPassFromTeammate() {
+        if (this.mode !== 'PLAYING' || !this.controlledPlayer) return;
+        if (this.callPassCooldown > 0) return;
+
+        const me = this.controlledPlayer;
+        const screenPt = this._worldToScreen(me.pos);
+
+        if (this.ball.holder && this.ball.holder.team === me.team && this.ball.holder !== me) {
+          this.callPassCooldown = 1.5;
+          this._passToTeammate(this.ball.holder, me, false);
+          spawnCallout('🙌 PASS HERE!', screenPt.x, screenPt.y - 35, 'text-emerald-300', 'text-base');
+        } else if (this.ball.holder === me) {
+          const mate = this._findNearestFacingTeammate(me);
+          if (mate) {
+            this.callPassCooldown = 1.0;
+            this._passToTeammate(me, mate, false);
+          }
+        } else {
+          spawnCallout('TEAMMATE NEEDS BALL!', screenPt.x, screenPt.y - 35, 'text-amber-300', 'text-sm');
+        }
+      }
+
+      _triggerLobPass() {
+        if (this.mode !== 'PLAYING' || !this.controlledPlayer) return;
+        if (this.lobPassCooldown > 0) return;
+        const me = this.controlledPlayer;
+        if (this.ball.holder !== me) return;
+
+        const mate = this._findNearestFacingTeammate(me);
+        if (mate) {
+          this.lobPassCooldown = 1.5;
+          this._passToTeammate(me, mate, true);
+          const screenPt = this._worldToScreen(me.pos);
+          spawnCallout('🌈 LOB PASS!', screenPt.x, screenPt.y - 35, 'text-cyan-300', 'text-base');
+        }
+      }
+
+      _switchControlledPlayer() {
+        if (!this.controlledPlayer) return;
+        const myTeam = this.controlledPlayer.team;
+        let best = null;
+        let bestDist = Infinity;
+
+        this.players.forEach(p => {
+          if (p.team !== myTeam || p.isGK || p === this.controlledPlayer) return;
+          const d = p.pos.distanceTo(this.ball.pos);
+          if (d < bestDist) {
+            bestDist = d;
+            best = p;
+          }
+        });
+
+        if (best) {
+          this.controlledPlayer = best;
+          this._updateControlledVisuals();
+          const pt = this._worldToScreen(best.pos);
+          spawnCallout(`CONTROL #${best.capNum}`, pt.x, pt.y - 35, 'text-lime-300', 'text-sm');
+        }
+      }
+
+      _triggerJumpBlock() {
+        if (this.mode !== 'PLAYING' || !this.controlledPlayer) return;
+        const me = this.controlledPlayer;
+        if (me.blockTimer > 0) return;
+        me.blockTimer = 0.75;
+        me.stamina = Math.max(0, me.stamina - 3);
+        sfx.playSplash(0.6);
+        this._spawnSplash(me.pos, 10, 0.75);
+        const pt = this._worldToScreen(me.pos);
+        spawnCallout('🛡️ SHOT BLOCK!', pt.x, pt.y - 35, 'text-sky-300', 'text-sm');
+      }
+
+      _triggerSkill(slot) {
+        if (this.mode !== 'PLAYING' || !this.controlledPlayer) return;
+        const me = this.controlledPlayer;
+        const cdKey = slot === 1 ? 'skill1Cd' : 'skill2Cd';
+        if (me[cdKey] > 0) return;
+
+        const skill = slot === 1 ? me.archetype.skill1 : me.archetype.skill2;
+        me[cdKey] = skill.cd;
+        me.boostTimer = 2.5;
+        sfx.playPing(740, 0.22, 'sawtooth', 0.16);
+        this._spawnSplash(me.pos, 14, 1.0);
+
+        const pt = this._worldToScreen(me.pos);
+        spawnCallout(`⚡ ${skill.name.toUpperCase()}!`, pt.x, pt.y - 40, 'text-amber-300', 'text-base');
+
+        if (this.ball.holder === me && slot === 1 && me.archetypeKey === 'shooter') {
+          this._releaseShot(me, 0.92, true);
+        }
+      }
+
+      _triggerTackleOrIntercept(tackler) {
+        if (this.mode !== 'PLAYING' || !tackler || tackler.tackleCooldown > 0 || tackler.stunTimer > 0) return;
+
+        tackler.tackleCooldown = 3.0;
+        tackler.stamina = Math.max(0, tackler.stamina - 3.5);
+        const lungeDir = new THREE.Vector3(Math.sin(tackler.facing), 0, Math.cos(tackler.facing));
+        tackler.vel.addScaledVector(lungeDir, 3.6);
+        sfx.playSplash(0.55);
+        this._spawnSplash(tackler.pos, 8, 0.7);
+
+        // If ball is loose within reach, scoop it up
+        if (!this.ball.holder && this.ball.pos.distanceTo(tackler.pos) < 1.55 && this.ball.pos.y < 1.1) {
+          this.ball.holder = tackler;
+          this.ball.lastTouchTeam = tackler.team;
+          this.ball.vel.set(0, 0, 0);
+          return;
+        }
+
+        const carrier = this.ball.holder;
+        if (!carrier || carrier.team === tackler.team) return;
+        if (carrier.tackleImmunity > 0) return;
+        if (tackler.pos.distanceTo(carrier.pos) > 1.85) return;
+
+        const userInvolved = tackler === this.controlledPlayer || carrier === this.controlledPlayer;
+
+        // 25% of player-involved tackles trigger the 3-second mashing clash; 75% resolve instantly (50/50)
+        if (userInvolved && Math.random() < 0.25) {
+          this.mode = 'TACKLE_CLASH';
+          this.clashState = {
+            timer: 3.0,
+            progress: 0.5,
+            userPlayer: tackler === this.controlledPlayer ? tackler : carrier,
+            cpuPlayer: tackler === this.controlledPlayer ? carrier : tackler,
+            userIsTackler: tackler === this.controlledPlayer,
+            cpuTapAccum: 0
+          };
+          document.getElementById('clash-bar').style.width = '50%';
+          document.getElementById('clash-timer').textContent = '3.0';
+          document.getElementById('tackle-clash-modal').classList.remove('hidden');
+          sfx.playWhistle();
+        } else {
+          // Instant 50% tackle success / 50% escape resolution
+          const tackleSuccess = Math.random() < 0.5;
+          if (tackleSuccess) {
+            this.ball.holder = tackler;
+            this.ball.lastTouchTeam = tackler.team;
+            tackler.tackleImmunity = 3.0;
+            carrier.stunTimer = 1.4;
+            if (tackler.team === 'blue' && !tackler.isGK) {
+              this.controlledPlayer = tackler;
+              this._updateControlledVisuals();
+            }
+            const pt = this._worldToScreen(tackler.pos);
+            spawnCallout('💥 BALL STOLEN!', pt.x, pt.y - 35, 'text-emerald-300', 'text-base');
+            sfx.playPing(660, 0.16);
+          } else {
+            carrier.tackleImmunity = 3.0;
+            tackler.stunTimer = 1.2;
+            const pt = this._worldToScreen(carrier.pos);
+            spawnCallout('🛡️ ESCAPED TACKLE!', pt.x, pt.y - 35, 'text-amber-300', 'text-base');
+            sfx.playPing(380, 0.14);
+          }
+          this._spawnSplash(carrier.pos, 12, 0.9);
+        }
+      }
+
+      _mashClash(isUser) {
+        if (this.mode !== 'TACKLE_CLASH' || !this.clashState) return;
+        const step = 0.048 * (isUser ? this.clashState.userPlayer.archetype.tackleMult : 1.0);
+        this.clashState.progress = Math.max(0, Math.min(1, this.clashState.progress + (isUser ? step : -step)));
+        document.getElementById('clash-bar').style.width = `${Math.round(this.clashState.progress * 100)}%`;
+
+        if (this.clashState.progress >= 1.0 || this.clashState.progress <= 0.0) {
+          this._resolveTackleClash();
+        }
+      }
+
+      _resolveTackleClash() {
+        if (!this.clashState) return;
+        const { progress, userPlayer, cpuPlayer } = this.clashState;
+        const userWon = progress >= 0.5;
+
+        const winner = userWon ? userPlayer : cpuPlayer;
+        const loser = userWon ? cpuPlayer : userPlayer;
+
+        this.ball.holder = winner;
+        this.ball.lastTouchTeam = winner.team;
+        winner.tackleImmunity = 3.0;
+        winner.tackleCooldown = 3.0;
+        loser.stunTimer = 1.5;
+        loser.tackleCooldown = 3.0;
+
+        if (userWon) {
+          this.controlledPlayer = userPlayer;
+          this._updateControlledVisuals();
+        }
+
+        document.getElementById('tackle-clash-modal').classList.add('hidden');
+        this.clashState = null;
+        this.mode = 'PLAYING';
+
+        const pt = this._worldToScreen(winner.pos);
+        spawnCallout(userWon ? '🏆 CLASH WON!' : '❌ TACKLED!', pt.x, pt.y - 40, userWon ? 'text-emerald-300' : 'text-rose-400', 'text-lg');
+        sfx.playWhistle();
+        this._spawnSplash(winner.pos, 14, 1.0);
+      }
+
+      // =====================================================================
+      // 10. SIMULATION LOOP: ATHLETES, AI, BALL PHYSICS & ANIMATIONS
+      // =====================================================================
+      _lerpAngle(a, b, t) {
+        let diff = b - a;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        return a + diff * t;
+      }
+
+      _updatePlayer(p, dt) {
+        p.aiPhase += dt * 2.1;
+        p.tackleCooldown = Math.max(0, p.tackleCooldown - dt);
+        p.tackleImmunity = Math.max(0, p.tackleImmunity - dt);
+        p.stunTimer = Math.max(0, p.stunTimer - dt);
+        p.blockTimer = Math.max(0, p.blockTimer - dt);
+        p.diveTimer = Math.max(0, p.diveTimer - dt);
+        p.throwFollow = Math.max(0, p.throwFollow - dt);
+        p.skill1Cd = Math.max(0, p.skill1Cd - dt);
+        p.skill2Cd = Math.max(0, p.skill2Cd - dt);
+        p.boostTimer = Math.max(0, p.boostTimer - dt);
+
+        if (this.mode !== 'PLAYING') {
+          this._animateAthleteRig(p, dt, false);
+          return;
+        }
+
+        if (p.stunTimer > 0) {
+          p.vel.multiplyScalar(0.88);
+          p.pos.addScaledVector(p.vel, dt);
+          this._clampToPool(p);
+          this._animateAthleteRig(p, dt, false);
+          return;
+        }
+
+        let moveVec = new THREE.Vector3(0, 0, 0);
+        let isSprinting = false;
+
+        if (p === this.controlledPlayer) {
+          // User Keyboard Movement
+          if (this.keys['KeyW'] || this.keys['ArrowUp']) moveVec.z -= 1;
+          if (this.keys['KeyS'] || this.keys['ArrowDown']) moveVec.z += 1;
+          if (this.keys['KeyA'] || this.keys['ArrowLeft']) moveVec.x -= 1;
+          if (this.keys['KeyD'] || this.keys['ArrowRight']) moveVec.x += 1;
+
+          if (moveVec.lengthSq() > 0.001) {
+            moveVec.normalize();
+            isSprinting = Boolean(this.keys['ShiftLeft'] || this.keys['ShiftRight']) && p.stamina > 4;
+          }
+        } else if (p.isGK) {
+          // Goalkeeper Positioning & Balanced Reflex Saves
+          const goalX = p.team === 'blue' ? -HALF_L + 0.85 : HALF_L - 0.85;
+          const desiredZ = THREE.MathUtils.clamp(this.ball.pos.z * 0.45, -GOAL_WIDTH * 0.42, GOAL_WIDTH * 0.42);
+          const toSpot = new THREE.Vector3(goalX - p.pos.x, 0, desiredZ - p.pos.z);
+
+          if (toSpot.length() > 0.08) {
+            moveVec.copy(toSpot).normalize().multiplyScalar(0.78);
+          } else {
+            // Continuous ready sculling
+            moveVec.set(0, 0, Math.sin(p.aiPhase * 1.4) * 0.28);
+          }
+
+          // GK Outlet Pass if holding the ball
+          if (this.ball.holder === p) {
+            p.aiPassTimer -= dt;
+            if (p.aiPassTimer <= 0) {
+              p.aiPassTimer = 1.4;
+              const openMate = this.players.find(m => m.team === p.team && !m.isGK);
+              if (openMate) this._passToTeammate(p, openMate, true);
+            }
+          } else if (
+            !this.ball.holder &&
+            this.ball.lastTouchTeam !== p.team &&
+            Math.abs(this.ball.pos.x - goalX) < 4.2 &&
+            Math.abs(this.ball.vel.x) > 4.5
+          ) {
+            // Balanced save reach (1.25m) and fair save odds (24% fast shots, 38% softer shots) leaving top/corner gaps
+            const distToBall = p.pos.distanceTo(this.ball.pos);
+            const saveChance = this.ball.isPowerShot ? 0.24 : 0.38;
+            if (distToBall < 1.25 && this.ball.pos.y <= GOAL_HEIGHT + 0.05 && p.diveTimer <= 0) {
+              p.diveTimer = 0.72;
+              p.diveDir = Math.sign(this.ball.pos.z - p.pos.z) || 1;
+              if (Math.random() < saveChance) {
+                this.ball.holder = p;
+                this.ball.lastTouchTeam = p.team;
+                this.ball.vel.set(0, 0, 0);
+                this.shotClock = 30;
+                const pt = this._worldToScreen(p.pos);
+                spawnCallout('🧤 GK SAVE!', pt.x, pt.y - 35, 'text-amber-300', 'text-base');
+                sfx.playPing(680, 0.18);
+                this._spawnSplash(p.pos, 12, 0.9);
+              }
+            }
+          }
+        } else {
+          // Tactical Water Polo Field AI (Continuous swimming, spacing, off-ball cuts, passing & shooting)
+          const sign = p.team === 'blue' ? 1 : -1;
+          const enemyGoalX = sign * (HALF_L - 0.5);
+
+          if (this.ball.holder === p) {
+            // Ball Carrier AI
+            p.aiPassTimer -= dt;
+            const distGoal = Math.abs(enemyGoalX - p.pos.x);
+
+            // Shoot when inside scoring range (8.2m)
+            if (distGoal < 8.2 && p.aiPassTimer <= 0.4) {
+              this._releaseShot(p, 0.55 + Math.random() * 0.28, false);
+              p.aiPassTimer = 1.6;
+            } else if (p.aiPassTimer <= 0) {
+              // Look for an open teammate closer to enemy goal
+              let targetMate = null;
+              let bestAdv = -Infinity;
+              this.players.forEach(m => {
+                if (m.team !== p.team || m === p || m.isGK) return;
+                const adv = (m.pos.x - p.pos.x) * sign;
+                if (adv > 1.2 && adv > bestAdv) {
+                  bestAdv = adv;
+                  targetMate = m;
+                }
+              });
+              if (targetMate) {
+                this._passToTeammate(p, targetMate, Math.random() < 0.25);
+              } else {
+                this._releaseShot(p, 0.62, false);
+              }
+              p.aiPassTimer = 1.5 + Math.random() * 1.4;
+            } else {
+              // Drive forward while weaving slightly
+              moveVec.set(sign * 0.85, 0, Math.sin(p.aiPhase) * 0.45).normalize();
+            }
+          } else if (!this.ball.holder && p.pos.distanceTo(this.ball.pos) < 6.5) {
+            // Pursue loose ball
+            const toBall = new THREE.Vector3(this.ball.pos.x - p.pos.x, 0, this.ball.pos.z - p.pos.z);
+            if (toBall.length() > 0.1) moveVec.copy(toBall).normalize();
+          } else if (this.ball.holder && this.ball.holder.team === p.team) {
+            // Offensive Umbrella Spacing + Off-Ball Cuts
+            const targetX = THREE.MathUtils.clamp(p.homePos.x + sign * 4.8 + Math.cos(p.aiPhase) * 1.2, -HALF_L + 2.5, HALF_L - 2.5);
+            const targetZ = THREE.MathUtils.clamp(p.homePos.z + Math.sin(p.aiPhase * 0.85) * 1.4, -HALF_W + 1.4, HALF_W - 1.4);
+            const toSpot = new THREE.Vector3(targetX - p.pos.x, 0, targetZ - p.pos.z);
+            if (toSpot.length() > 0.25) {
+              moveVec.copy(toSpot).normalize().multiplyScalar(0.82);
+            } else {
+              moveVec.set(Math.cos(p.aiPhase) * 0.35, 0, Math.sin(p.aiPhase) * 0.35);
+            }
+          } else {
+            // Defensive Marking & Zone Shadowing (75% less frequent tackling)
+            const carrier = this.ball.holder;
+            if (carrier && carrier.team !== p.team && p.pos.distanceTo(carrier.pos) < 5.5) {
+              const toCarrier = new THREE.Vector3(carrier.pos.x - p.pos.x, 0, carrier.pos.z - p.pos.z);
+              const d = toCarrier.length();
+              if (d > 1.45) {
+                moveVec.copy(toCarrier).normalize().multiplyScalar(0.85);
+              } else {
+                // Shadow closely and only attempt tackle occasionally
+                moveVec.set(-toCarrier.z * 0.35, 0, toCarrier.x * 0.35);
+                if (p.tackleCooldown <= 0 && Math.random() < 0.008) {
+                  this._triggerTackleOrIntercept(p);
+                }
+              }
+            } else {
+              // Defensive zone treading
+              const defX = THREE.MathUtils.clamp(p.homePos.x - sign * 3.2 + Math.cos(p.aiPhase) * 0.9, -HALF_L + 2.5, HALF_L - 2.5);
+              const defZ = THREE.MathUtils.clamp(p.homePos.z + Math.sin(p.aiPhase) * 1.1, -HALF_W + 1.4, HALF_W - 1.4);
+              const toDef = new THREE.Vector3(defX - p.pos.x, 0, defZ - p.pos.z);
+              if (toDef.length() > 0.2) {
+                moveVec.copy(toDef).normalize().multiplyScalar(0.75);
+              } else {
+                moveVec.set(Math.cos(p.aiPhase) * 0.3, 0, Math.sin(p.aiPhase) * 0.3);
+              }
+            }
+          }
+
+          // Teammate separation steering so AI athletes never clump together
+          this.players.forEach(other => {
+            if (other === p || other.team !== p.team) return;
+            const diff = new THREE.Vector3().subVectors(p.pos, other.pos);
+            diff.y = 0;
+            const d = diff.length();
+            if (d > 0.01 && d < 2.2) {
+              moveVec.addScaledVector(diff.normalize(), (2.2 - d) * 0.45);
+            }
+          });
+          if (moveVec.length() > 1) moveVec.normalize();
+        }
+
+        // Stamina Management:
+        // Sprinting uses stamina slowly (3.2/s), normal swimming restores slowly (+4.2/s), stationary restores faster (+13.5/s)
+        const isMoving = moveVec.lengthSq() > 0.02;
+        if (isSprinting) {
+          p.stamina = Math.max(0, p.stamina - 3.2 * dt);
+        } else if (isMoving) {
+          p.stamina = Math.min(100, p.stamina + 4.2 * p.archetype.staminaRegenMult * dt);
+        } else {
+          p.stamina = Math.min(100, p.stamina + 13.5 * p.archetype.staminaRegenMult * dt);
+        }
+
+        // Authentic Water Polo Swimming Speed
+        const baseSwim = 2.85 * p.archetype.speedMult;
+        const sprintMult = isSprinting ? 1.52 : 1.0;
+        const boostMult = p.boostTimer > 0 ? 1.28 : 1.0;
+        const staminaFactor = 0.82 + 0.18 * (p.stamina / 100);
+        const maxSpeed = baseSwim * sprintMult * boostMult * staminaFactor;
+
+        const targetVel = moveVec.multiplyScalar(maxSpeed);
+        p.vel.lerp(targetVel, Math.min(1, dt * 6.5));
+        p.pos.addScaledVector(p.vel, dt);
+        this._clampToPool(p);
+
+        // Smooth Facing Direction
+        if (p.vel.lengthSq() > 0.06) {
+          const desiredYaw = Math.atan2(p.vel.x, p.vel.z);
+          p.facing = this._lerpAngle(p.facing, desiredYaw, Math.min(1, dt * 9.0));
+        } else if (p.isGK) {
+          const goalLook = p.team === 'blue' ? Math.PI / 2 : -Math.PI / 2;
+          p.facing = this._lerpAngle(p.facing, goalLook, Math.min(1, dt * 8.0));
+        }
+
+        // Automatic Ball Pickup when swimming into a loose low ball
+        if (!this.ball.holder && this.ball.pos.y < 0.95 && p.pos.distanceTo(this.ball.pos) < 0.85) {
+          const sameTeamJustThrew = this.ball.lastTouchTeam === p.team && this.ball.vel.length() > 8.5;
+          if (!sameTeamJustThrew) {
+            this.ball.holder = p;
+            if (this.ball.lastTouchTeam && this.ball.lastTouchTeam !== p.team) {
+              this.shotClock = 30;
+              const pt = this._worldToScreen(p.pos);
+              spawnCallout('INTERCEPTED!', pt.x, pt.y - 35, 'text-sky-300', 'text-sm');
+            }
+            this.ball.lastTouchTeam = p.team;
+            this.ball.vel.set(0, 0, 0);
+            if (p.team === 'blue' && !p.isGK) {
+              this.controlledPlayer = p;
+              this._updateControlledVisuals();
+            }
+          }
+        }
+
+        this._animateAthleteRig(p, dt, isMoving);
+      }
+
+      _clampToPool(p) {
+        p.pos.x = THREE.MathUtils.clamp(p.pos.x, -HALF_L + 0.65, HALF_L - 0.65);
+        p.pos.z = THREE.MathUtils.clamp(p.pos.z, -HALF_W + 0.65, HALF_W - 0.65);
+      }
+
+      _animateAthleteRig(p, dt, isMoving) {
+        const { group, bodyPivot, leftShoulder, rightShoulder, selectRing, arrowGroup } = p.mesh;
+        group.position.copy(p.pos);
+        group.rotation.y = p.facing;
+
+        const t = performance.now() * 0.008 + p.index;
+        const bob = Math.sin(t) * 0.035;
+
+        // Controlled-player beacon pulse
+        if (p === this.controlledPlayer) {
+          arrowGroup.position.y = 1.62 + Math.sin(performance.now() * 0.007) * 0.12;
+          arrowGroup.rotation.y += dt * 2.5;
+          const pulse = 1.0 + Math.sin(performance.now() * 0.009) * 0.08;
+          selectRing.scale.set(pulse, pulse, 1);
+        }
+
+        // Goalkeeper Dive Animation
+        if (p.diveTimer > 0) {
+          bodyPivot.position.y = 0.34;
+          bodyPivot.rotation.z = -p.diveDir * 1.15;
+          bodyPivot.rotation.x = 0.25;
+          leftShoulder.rotation.set(-2.7, 0, -0.35);
+          rightShoulder.rotation.set(-2.7, 0, 0.35);
+          return;
+        }
+
+        // Shot Block Jump Animation
+        if (p.blockTimer > 0) {
+          bodyPivot.position.y = 0.45;
+          bodyPivot.rotation.set(0, 0, 0);
+          leftShoulder.rotation.set(-2.9, 0, -0.25);
+          rightShoulder.rotation.set(-2.9, 0, 0.25);
+          return;
+        }
+
+        bodyPivot.rotation.z = 0;
+
+        // Shooting Windup & Follow-Through Animation
+        if (this.ball.holder === p) {
+          const charging = p === this.controlledPlayer && this.isChargingShot;
+          const windup = charging ? this.shotCharge : 0.35;
+          bodyPivot.position.y = 0.18 + windup * 0.18 + bob * 0.5;
+          bodyPivot.rotation.x = -0.18 * windup;
+          rightShoulder.rotation.set(-2.35 - windup * 0.65, 0, 0.25);
+          leftShoulder.rotation.set(-0.5 + Math.sin(t * 1.5) * 0.25, 0, -0.45);
+          return;
+        }
+
+        if (p.throwFollow > 0) {
+          bodyPivot.position.y = 0.16;
+          bodyPivot.rotation.x = 0.28;
+          rightShoulder.rotation.set(-0.55, 0, 0.15);
+          leftShoulder.rotation.set(-0.4, 0, -0.35);
+          return;
+        }
+
+        // Freestyle Swimming Stroke vs. Water Treading
+        if (isMoving) {
+          bodyPivot.position.y = 0.02 + bob * 0.5;
+          bodyPivot.rotation.x = 0.42;
+          leftShoulder.rotation.set(Math.sin(t * 1.7) * 1.65 - 1.2, 0, -0.2);
+          rightShoulder.rotation.set(Math.sin(t * 1.7 + Math.PI) * 1.65 - 1.2, 0, 0.2);
+        } else {
+          bodyPivot.position.y = 0.06 + bob;
+          bodyPivot.rotation.x = 0.06;
+          leftShoulder.rotation.set(-0.35 + Math.sin(t) * 0.2, 0, -0.45);
+          rightShoulder.rotation.set(-0.35 - Math.sin(t) * 0.2, 0, 0.45);
+        }
+      }
+
+      _updateBallPhysics(dt) {
+        if (!this.ball) return;
+
+        // 10% Shot Block Chance in tight defender traffic
+        if (
+          this.mode === 'PLAYING' &&
+          !this.ball.holder &&
+          this.ball.isPowerShot &&
+          this.ball.vel.length() > 11.0
+        ) {
+          for (const def of this.players) {
+            if (def.team === this.ball.lastTouchTeam || def.isGK) continue;
+            if (def.pos.distanceTo(this.ball.pos) < 1.05 && this.ball.pos.y < 1.15) {
+              if (Math.random() < 0.10) {
+                this.ball.vel.x *= -0.35;
+                this.ball.vel.z += (Math.random() > 0.5 ? 1 : -1) * 4.5;
+                this.ball.vel.y = 3.2;
+                this.ball.isPowerShot = false;
+                const pt = this._worldToScreen(def.pos);
+                spawnCallout('🛡️ DEFLECTED!', pt.x, pt.y - 35, 'text-sky-300', 'text-sm');
+                this._spawnSplash(this.ball.pos, 10, 0.8);
+                break;
+              }
+            }
+          }
+        }
+
+        if (this.ball.holder) {
+          const h = this.ball.holder;
+          const handOffset = new THREE.Vector3(0.32, 0.72, 0.18).applyAxisAngle(new THREE.Vector3(0, 1, 0), h.facing);
+          this.ball.pos.copy(h.pos).add(handOffset);
+          this.ball.mesh.position.copy(this.ball.pos);
+          return;
+        }
+
+        // Airborne / Water Ball Trajectory
+        const prevY = this.ball.pos.y;
+        this.ball.vel.y -= 14.5 * dt;
+        this.ball.pos.addScaledVector(this.ball.vel, dt);
+        this.ball.mesh.rotation.x += this.ball.vel.z * dt * 1.4;
+        this.ball.mesh.rotation.z -= this.ball.vel.x * dt * 1.4;
+
+        // Water Surface Bounce / Skip Shot / Splash Ripple
+        if (this.ball.pos.y <= 0.24) {
+          if (prevY > 0.28) {
+            this._spawnSplash(this.ball.pos, this.ball.isSkipShot ? 14 : 9, this.ball.isSkipShot ? 1.0 : 0.65);
+            sfx.playSplash(0.5);
+          }
+
+          if (this.ball.isSkipShot && Math.abs(this.ball.vel.x) > 8.0) {
+            this.ball.pos.y = 0.25;
+            this.ball.vel.y = 3.8;
+            this.ball.isSkipShot = false;
+          } else {
+            this.ball.pos.y = 0.24;
+            this.ball.vel.y = Math.max(0, -this.ball.vel.y * 0.28);
+            this.ball.vel.x *= Math.pow(0.18, dt);
+            this.ball.vel.z *= Math.pow(0.18, dt);
+            this.ball.isPowerShot = false;
+          }
+        }
+
+        // Goal Detection (Let scored ball travel all the way into the back of the net!)
+        if (this.mode === 'PLAYING') {
+          const inGoalMouthZ = Math.abs(this.ball.pos.z) < (GOAL_WIDTH / 2 - 0.12);
+          const inGoalMouthY = this.ball.pos.y <= GOAL_HEIGHT + 0.08;
+
+          if (this.ball.pos.x >= HALF_L - 0.15 && inGoalMouthZ && inGoalMouthY) {
+            this._onGoalScored('blue');
+          } else if (this.ball.pos.x <= -HALF_L + 0.15 && inGoalMouthZ && inGoalMouthY) {
+            this._onGoalScored('red');
+          }
+        }
+
+        // Pool Wall & Goal Back-Net Bounds
+        if (this.mode === 'GOAL_PAUSE') {
+          const maxNetX = HALF_L + 1.05;
+          if (Math.abs(this.ball.pos.x) > maxNetX) {
+            this.ball.pos.x = Math.sign(this.ball.pos.x) * maxNetX;
+            this.ball.vel.x *= -0.2;
+          }
+          if (Math.abs(this.ball.pos.z) > GOAL_WIDTH / 2 - 0.18) {
+            this.ball.pos.z = Math.sign(this.ball.pos.z) * (GOAL_WIDTH / 2 - 0.18);
+            this.ball.vel.z *= -0.2;
+          }
+        } else {
+          if (Math.abs(this.ball.pos.x) > HALF_L - 0.22) {
+            this.ball.pos.x = Math.sign(this.ball.pos.x) * (HALF_L - 0.22);
+            this.ball.vel.x *= -0.45;
+          }
+          if (Math.abs(this.ball.pos.z) > HALF_W - 0.22) {
+            this.ball.pos.z = Math.sign(this.ball.pos.z) * (HALF_W - 0.22);
+            this.ball.vel.z *= -0.45;
+          }
+        }
+
+        this.ball.mesh.position.copy(this.ball.pos);
+      }
+
+      _onGoalScored(team) {
+        if (this.mode !== 'PLAYING') return;
+        this.mode = 'GOAL_PAUSE';
+        this.goalPauseTimer = 2.6;
+        this.cheerTimer = 2.6;
+        this.netRippleTimer = 0.85;
+        this.netRippleSide = team === 'blue' ? 'red' : 'blue';
+
+        if (team === 'blue') this.blueScore++;
+        else this.redScore++;
+
+        this._showBanner(team === 'blue' ? 'SHARKS SCORE!' : 'TITANS SCORE!', 'GOAL!!');
+        sfx.playWhistle();
+        sfx.playGoalHorn();
+        this._spawnSplash(this.ball.pos, 22, 1.3);
+      }
+
+      // =====================================================================
+      // 11. WATER, NET BILLOW & SPECTATOR CHEER ANIMATIONS
+      // =====================================================================
+      _animateWaterAndCrowd(dt) {
+        const now = performance.now() * 0.0024;
+        if (this.waterMesh) {
+          const pos = this.waterMesh.geometry.attributes.position;
+          for (let i = 0; i < pos.count; i++) {
+            const x = pos.getX(i);
+            const y = pos.getY(i);
+            const wave = Math.sin(x * 0.45 + now) * 0.016 + Math.cos(y * 0.55 + now * 1.1) * 0.014;
+            pos.setZ(i, wave);
+          }
+          pos.needsUpdate = true;
+        }
+
+        // Goal Net Billow Effect when scored
+        if (this.netRippleTimer > 0) {
+          this.netRippleTimer = Math.max(0, this.netRippleTimer - dt);
+          const bulge = Math.sin((1 - this.netRippleTimer / 0.85) * Math.PI) * 0.42;
+          if (this.netRippleSide === 'red' && this.redGoalNet) {
+            this.redGoalNet.position.x = 1.25 + bulge;
+          } else if (this.netRippleSide === 'blue' && this.blueGoalNet) {
+            this.blueGoalNet.position.x = -1.25 - bulge;
+          }
+        } else {
+          if (this.redGoalNet) this.redGoalNet.position.x = 1.25;
+          if (this.blueGoalNet) this.blueGoalNet.position.x = -1.25;
+        }
+
+        // Cheering Grandstand Crowd
+        const isCheering = this.cheerTimer > 0;
+        if (this.cheerTimer > 0) this.cheerTimer = Math.max(0, this.cheerTimer - dt);
+        const crowdT = performance.now() * 0.012;
+        this.spectators.forEach(s => {
+          const jump = isCheering ? Math.abs(Math.sin(crowdT + s.phase)) * 0.34 : Math.sin(crowdT * 0.25 + s.phase) * 0.03;
+          s.mesh.position.y = s.baseY + jump;
+        });
+      }
+
+      // =====================================================================
+      // 12. CAMERA, HUD & MAIN FIXED/VARIABLE FRAME LOOP
+      // =====================================================================
+      _updateCamera(dt) {
+        if (this.mode === 'MENU') {
+          const ang = performance.now() * 0.00022;
+          this.camPos.set(Math.cos(ang) * 24, 13.5, Math.sin(ang) * 24);
+          this.camLook.set(0, 0.5, 0);
+          this.camera.position.copy(this.camPos);
+          this.camera.lookAt(this.camLook);
+          return;
+        }
+
+        const focus = this.ball ? this.ball.pos.clone() : new THREE.Vector3();
+        if (this.controlledPlayer) {
+          focus.lerp(this.controlledPlayer.pos, 0.35);
+        }
+
+        const targetPos = new THREE.Vector3();
+        const targetLook = new THREE.Vector3(focus.x * 0.72, 0.4, focus.z * 0.65);
+
+        if (this.cameraMode === 0) {
+          targetPos.set(focus.x * 0.55, 16.5, 21.5 + focus.z * 0.35);
+        } else if (this.cameraMode === 1) {
+          targetPos.set(focus.x - 9.5, 10.5, focus.z * 0.75 + 11.5);
+          targetLook.set(focus.x + 2.0, 0.5, focus.z * 0.75);
+        } else {
+          targetPos.set(-22.5, 13.5, focus.z * 0.5);
+          targetLook.set(0, 0.4, focus.z * 0.5);
+        }
+
+        this.camPos.lerp(targetPos, Math.min(1, dt * 5.0));
+        this.camLook.lerp(targetLook, Math.min(1, dt * 6.5));
+        this.camera.position.copy(this.camPos);
+        this.camera.lookAt(this.camLook);
+      }
+
+      _updateHUD() {
+        document.getElementById('hud-blue-score').textContent = this.blueScore;
+        document.getElementById('hud-red-score').textContent = this.redScore;
+        document.getElementById('hud-period').textContent = `Q${this.quarter}`;
+
+        const mins = Math.floor(Math.max(0, this.gameClock) / 60);
+        const secs = Math.floor(Math.max(0, this.gameClock) % 60);
+        document.getElementById('hud-game-clock').textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        document.getElementById('hud-shot-clock').textContent = Math.ceil(Math.max(0, this.shotClock));
+
+        const me = this.controlledPlayer;
+        if (!me) return;
+
+        const sta = Math.round(me.stamina);
+        document.getElementById('hud-stamina-val').textContent = `${sta}%`;
+        document.getElementById('hud-stamina-bar').style.width = `${sta}%`;
+
+        const fmtCd = (v) => (v > 0 ? `${v.toFixed(1)}s` : 'READY');
+        document.getElementById('hud-skill1-cd').textContent = fmtCd(me.skill1Cd);
+        document.getElementById('hud-skill2-cd').textContent = fmtCd(me.skill2Cd);
+        document.getElementById('hud-tackle-cd').textContent = fmtCd(me.tackleCooldown);
+        document.getElementById('hud-callpass-cd').textContent = fmtCd(this.callPassCooldown);
+        document.getElementById('hud-lobpass-cd').textContent = fmtCd(this.lobPassCooldown);
+      }
+
+      _loop(now) {
+        const dt = Math.min(0.05, (now - this.lastTime) / 1000);
+        this.lastTime = now;
+
+        this.callPassCooldown = Math.max(0, this.callPassCooldown - dt);
+        this.lobPassCooldown = Math.max(0, this.lobPassCooldown - dt);
+
+        if (this.mode === 'COUNTDOWN') {
+          const prevSec = Math.ceil(this.countdownTimer);
+          this.countdownTimer -= dt;
+          const curSec = Math.ceil(this.countdownTimer);
+          if (curSec > 0 && curSec !== prevSec) {
+            document.getElementById('center-banner-main').textContent = String(curSec);
+            sfx.playPing(520, 0.14);
+          }
+          if (this.countdownTimer <= 0) {
+            this.mode = 'PLAYING';
+            this._showBanner('SPRINT FOR THE BALL!', 'GO!');
+            sfx.playWhistle();
+            setTimeout(() => {
+              if (this.mode === 'PLAYING') this._hideBanner();
+            }, 850);
+          }
+        } else if (this.mode === 'PLAYING') {
+          // Shot Charge Progression
+          if (this.isChargingShot && this.controlledPlayer && this.ball.holder === this.controlledPlayer) {
+            this.shotCharge = Math.min(1.0, this.shotCharge + dt * 1.15);
+            const pct = Math.round(this.shotCharge * 100);
+            document.getElementById('shot-power-pct').textContent = `${pct}%`;
+            document.getElementById('shot-power-bar').style.width = `${pct}%`;
+          }
+
+          // Match & 30-Second Shot Clocks
+          this.gameClock -= dt;
+          if (this.ball.holder) {
+            this.shotClock -= dt;
+            if (this.shotClock <= 0) {
+              this.shotClock = 30;
+              const opp = this.players.find(p => p.team !== this.ball.holder.team && !p.isGK);
+              if (opp) {
+                this.ball.holder = opp;
+                this.ball.lastTouchTeam = opp.team;
+                sfx.playWhistle();
+                const pt = this._worldToScreen(opp.pos);
+                spawnCallout('30s SHOT CLOCK TURNOVER!', pt.x, pt.y - 40, 'text-amber-300', 'text-sm');
+              }
+            }
+          }
+
+          if (this.gameClock <= 0) {
+            if (this.quarter < 4) {
+              this.quarter++;
+              this.gameClock = this.quarterDuration;
+              this._resetPositionsForCountdown();
+            } else {
+              this.mode = 'GAMEOVER';
+              document.getElementById('pause-title').textContent = 'FINAL WHISTLE!';
+              document.getElementById('pause-subtitle').textContent =
+                this.blueScore > this.redScore ? '🏆 VICTORY FOR BLUE SHARKS!' :
+                (this.redScore > this.blueScore ? 'RED TITANS WIN!' : 'TIED CHAMPIONSHIP THRILLER!');
+              document.getElementById('final-score-box').classList.remove('hidden');
+              document.getElementById('final-score-text').textContent = `SHARKS ${this.blueScore} - ${this.redScore} TITANS`;
+              document.getElementById('btn-resume').classList.add('hidden');
+              document.getElementById('pause-modal').classList.remove('hidden');
+              sfx.playWhistle();
+            }
+          }
+        } else if (this.mode === 'GOAL_PAUSE') {
+          this.goalPauseTimer -= dt;
+          if (this.goalPauseTimer <= 0) {
+            this._resetPositionsForCountdown();
+          }
+        } else if (this.mode === 'TACKLE_CLASH' && this.clashState) {
+          this.clashState.timer -= dt;
+          this.clashState.cpuTapAccum += dt;
+          // CPU taps at a fair 8 taps per second
+          while (this.clashState.cpuTapAccum >= 0.125) {
+            this.clashState.cpuTapAccum -= 0.125;
+            this._mashClash(false);
+          }
+          document.getElementById('clash-timer').textContent = Math.max(0, this.clashState.timer).toFixed(1);
+          if (this.clashState.timer <= 0) {
+            this._resolveTackleClash();
+          }
+        }
+
+        this.players.forEach(p => this._updatePlayer(p, dt));
+        this._updateBallPhysics(dt);
+        this._updateParticles(dt);
+        this._animateWaterAndCrowd(dt);
+        this._updateCamera(dt);
+        if (this.mode !== 'MENU') this._updateHUD();
+
+        this.renderer.render(this.scene, this.camera);
+        requestAnimationFrame((t) => this._loop(t));
+      }
+
+      // =====================================================================
+      // 13. UI & CONTROLS BINDINGS
+      // =====================================================================
+      _bindUIAndControls() {
+        const bindClick = (id, fn) => {
+          const el = document.getElementById(id);
+          if (el) {
+            el.addEventListener('click', (e) => {
+              e.stopPropagation();
+              el.blur();
+              fn(e);
+            });
+          }
+        };
+
+        // Main Menu Buttons
+        bindClick('btn-play-solo', () => this._startMatch());
+        bindClick('btn-open-custom', () => document.getElementById('custom-modal').classList.remove('hidden'));
+        bindClick('btn-close-custom', () => document.getElementById('custom-modal').classList.add('hidden'));
+        bindClick('btn-open-multi', () => document.getElementById('multi-modal').classList.remove('hidden'));
+        bindClick('btn-close-multi', () => document.getElementById('multi-modal').classList.add('hidden'));
+        bindClick('btn-open-rules', () => document.getElementById('rules-modal').classList.remove('hidden'));
+        bindClick('btn-close-rules', () => document.getElementById('rules-modal').classList.add('hidden'));
+
+        // Save Athlete Customization
+        bindClick('btn-save-custom', () => {
+          const nameVal = document.getElementById('input-player-name').value.trim().toUpperCase();
+          if (nameVal) this.userName = nameVal;
+          const capVal = parseInt(document.getElementById('input-cap-num').value, 10);
+          if (!isNaN(capVal) && capVal >= 2 && capVal <= 15) this.userCapNum = capVal;
+          document.getElementById('custom-modal').classList.add('hidden');
+          this._spawnRoster();
+        });
+
+        // Difficulty & Quarter Length Selectors
+        document.querySelectorAll('.diff-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            this.difficulty = btn.dataset.diff;
+            document.querySelectorAll('.diff-btn').forEach(b => {
+              b.className = 'diff-btn py-1.5 rounded-xl text-xs font-black bg-slate-800 text-sky-200 border border-slate-700';
+            });
+            btn.className = 'diff-btn py-1.5 rounded-xl text-xs font-black bg-sky-500 text-slate-950 border border-white';
+          });
+        });
+
+        document.querySelectorAll('.qlen-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            this.quarterDuration = parseInt(btn.dataset.qlen, 10);
+            document.querySelectorAll('.qlen-btn').forEach(b => {
+              b.className = 'qlen-btn py-1.5 rounded-xl text-xs font-black bg-slate-800 text-sky-200 border border-slate-700';
+            });
+            btn.className = 'qlen-btn py-1.5 rounded-xl text-xs font-black bg-sky-500 text-slate-950 border border-white';
+          });
+        });
+
+        // Archetype & Team Color Selectors
+        document.querySelectorAll('.arch-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            this.userArchetypeKey = btn.dataset.arch;
+            document.querySelectorAll('.arch-btn').forEach(b => {
+              b.className = 'arch-btn p-3 rounded-2xl bg-slate-900/80 border border-slate-700 text-left';
+            });
+            btn.className = 'arch-btn p-3 rounded-2xl bg-sky-500/30 border-2 border-sky-300 text-left';
+          });
+        });
+
+        document.querySelectorAll('.color-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            this.blueColor = btn.dataset.color;
+            document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('border-4', 'border-white'));
+            btn.classList.add('border-4', 'border-white');
+            this._spawnRoster();
+          });
+        });
+
+        // HUD Top & Bottom Action Controls
+        bindClick('btn-mute', () => {
+          sfx.muted = !sfx.muted;
+          document.getElementById('btn-mute').textContent = sfx.muted ? '🔇' : '🔊';
+        });
+
+        bindClick('btn-cam', () => {
+          this.cameraMode = (this.cameraMode + 1) % 3;
+        });
+
+        bindClick('btn-pause', () => {
+          if (this.mode === 'PLAYING' || this.mode === 'COUNTDOWN') {
+            this.prevMode = this.mode;
+            this.mode = 'PAUSED';
+            document.getElementById('pause-title').textContent = 'MATCH PAUSED';
+            document.getElementById('pause-subtitle').textContent = 'Take a breather poolside.';
+            document.getElementById('final-score-box').classList.add('hidden');
+            document.getElementById('btn-resume').classList.remove('hidden');
+            document.getElementById('pause-modal').classList.remove('hidden');
+          }
+        });
+
+        bindClick('btn-resume', () => {
+          document.getElementById('pause-modal').classList.add('hidden');
+          this.mode = this.prevMode || 'PLAYING';
+        });
+
+        bindClick('btn-restart', () => this._startMatch());
+
+        bindClick('btn-quit-menu', () => {
+          this.mode = 'MENU';
+          document.getElementById('pause-modal').classList.add('hidden');
+          document.getElementById('game-hud').classList.add('hidden');
+          document.getElementById('tackle-clash-modal').classList.add('hidden');
+          document.getElementById('main-menu').classList.remove('hidden');
+        });
+
+        bindClick('hud-skill1-card', () => this._triggerSkill(1));
+        bindClick('hud-skill2-card', () => this._triggerSkill(2));
+        bindClick('hud-tackle-card', () => {
+          if (this.ball.holder === this.controlledPlayer) this._triggerJumpBlock();
+          else this._triggerTackleOrIntercept(this.controlledPlayer);
+        });
+        bindClick('hud-callpass-card', () => this._callPassFromTeammate());
+        bindClick('hud-lobpass-card', () => this._triggerLobPass());
+        bindClick('hud-switch-card', () => this._switchControlledPlayer());
+        bindClick('btn-clash-mash', () => this._mashClash(true));
+
+        // Canvas Mouse Controls (Hold & Release to Shoot; Click Off-Ball to Tackle)
+        this.canvas.addEventListener('mousedown', (e) => {
+          if (e.button !== 0 || this.mode !== 'PLAYING' || !this.controlledPlayer) return;
+          sfx._ensure();
+          const me = this.controlledPlayer;
+          if (this.ball.holder === me) {
+            this.isChargingShot = true;
+            this.shotCharge = 0.25;
+            this.mouseDownTime = performance.now();
+            document.getElementById('shot-meter-wrap').classList.remove('hidden');
+          } else {
+            this._triggerTackleOrIntercept(me);
+          }
+        });
+
+        window.addEventListener('mouseup', (e) => {
+          if (e.button !== 0 || !this.isChargingShot) return;
+          this.isChargingShot = false;
+          document.getElementById('shot-meter-wrap').classList.add('hidden');
+          if (this.mode === 'PLAYING' && this.controlledPlayer && this.ball.holder === this.controlledPlayer) {
+            this._releaseShot(this.controlledPlayer, Math.max(0.32, this.shotCharge), false);
+          }
+          this.shotCharge = 0;
+        });
+
+        // Keyboard Bindings
+        window.addEventListener('keydown', (e) => {
+          this.keys[e.code] = true;
+          if (e.repeat && e.code !== 'Space') return;
+
+          if (e.code === 'Space' && this.mode === 'TACKLE_CLASH') {
+            e.preventDefault();
+            this._mashClash(true);
+            return;
+          }
+
+          if (this.mode !== 'PLAYING' || !this.controlledPlayer) return;
+          const me = this.controlledPlayer;
+
+          if (e.code === 'KeyE') {
+            if (this.ball.holder === me) {
+              const mate = this._findNearestFacingTeammate(me);
+              if (mate) this._passToTeammate(me, mate, false);
+            } else {
+              this._triggerTackleOrIntercept(me);
+            }
+          } else if (e.code === 'KeyC') {
+            this._callPassFromTeammate();
+          } else if (e.code === 'KeyF') {
+            this._triggerLobPass();
+          } else if (e.code === 'KeyB') {
+            this._triggerJumpBlock();
+          } else if (e.code === 'KeyQ') {
+            this._switchControlledPlayer();
+          } else if (e.code === 'Digit1') {
+            this._triggerSkill(1);
+          } else if (e.code === 'Digit2') {
+            this._triggerSkill(2);
+          }
+        });
+
+        window.addEventListener('keyup', (e) => {
+          this.keys[e.code] = false;
+        });
+      }
+
+      // =====================================================================
+      // 14. SERVERLESS PEERJS 1v1 MULTIPLAYER SETUP
+      // =====================================================================
+      _initPeerJS() {
+        if (typeof Peer === 'undefined') return;
+        try {
+          const shortCode = 'AQUA-' + Math.floor(1000 + Math.random() * 9000);
+          this.peer = new Peer(shortCode);
+          this.peer.on('open', (id) => {
+            const el = document.getElementById('peer-my-id');
+            if (el) el.textContent = id;
+          });
+          this.peer.on('connection', (connection) => {
+            this.conn = connection;
+            this.isHost = true;
+            document.getElementById('peer-status').textContent = 'Opponent joined! Starting match...';
+            setTimeout(() => {
+              document.getElementById('multi-modal').classList.add('hidden');
+              this._startMatch();
+            }, 600);
+          });
+        } catch (err) {
+          console.warn('PeerJS unavailable:', err);
+        }
+
+        const copyBtn = document.getElementById('btn-copy-peer');
+        if (copyBtn) {
+          copyBtn.addEventListener('click', () => {
+            const code = document.getElementById('peer-my-id').textContent;
+            const tmp = document.createElement('input');
+            tmp.value = code;
+            document.body.appendChild(tmp);
+            tmp.select();
+            document.execCommand('copy');
+            document.body.removeChild(tmp);
+            document.getElementById('peer-status').textContent = 'Room code copied to clipboard!';
+          });
+        }
+
+        const connectBtn = document.getElementById('btn-peer-connect');
+        if (connectBtn) {
+          connectBtn.addEventListener('click', () => {
+            const targetId = document.getElementById('peer-join-input').value.trim().toUpperCase();
+            if (!targetId || !this.peer) return;
+            document.getElementById('peer-status').textContent = `Connecting to ${targetId}...`;
+            this.conn = this.peer.connect(targetId);
+            this.isHost = false;
+            this.conn.on('open', () => {
+              document.getElementById('peer-status').textContent = 'Connected! Launching match...';
+              setTimeout(() => {
+                document.getElementById('multi-modal').classList.add('hidden');
+                this._startMatch();
+              }, 600);
+            });
+          });
+        }
+      }
+
+      _worldToScreen(vec3) {
+        const v = vec3.clone().project(this.camera);
+        return {
+          x: (v.x * 0.5 + 0.5) * window.innerWidth,
+          y: (-(v.y * 0.5) + 0.5) * window.innerHeight
+        };
+      }
+
+      _onResize() {
+        this.camera.aspect = window.innerWidth / window.innerHeight;
+        this.camera.updateProjectionMatrix();
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+    }
+
+    window.addEventListener('load', () => {
+      window.aquaGame = new AquaLegendGame();
+    });
+  </script>
+</body>
+</html>
